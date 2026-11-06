@@ -1,4 +1,11 @@
 //! Sync engine; implements VfsEngine trait.
+//!
+//! Safety invariants (release blockers, design §5.5):
+//! 1. Never delete/overwrite remotely unless user action caused it.
+//! 2. Queued uploads survive crash and resume without loss/duplication.
+//! 3. Eviction never drops dirty data.
+//! 4. Remote changes never clobber unsynced local edits (conflict copy).
+//! 5. Quit waits for or reports pending uploads.
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -75,18 +82,24 @@ pub enum SyncError {
     NotFound,
     #[error("io: {0}")]
     Io(String),
+    #[error("conflict")]
+    Conflict,
     #[error("{0}")]
     Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, SyncError>;
 
+/// Placeholder engine for M0 scaffolding. Real engine lands in M1.
 pub struct PlaceholderEngine;
 
 #[async_trait]
 impl VfsEngine for PlaceholderEngine {
     async fn list(&self, _node: NodeId, _page: Option<PageToken>) -> Result<DirPage> {
-        Ok(DirPage { entries: vec![], next_page: None })
+        Ok(DirPage {
+            entries: vec![],
+            next_page: None,
+        })
     }
     async fn lookup(&self, _parent: NodeId, _name: &OsStr) -> Result<Option<NodeAttr>> {
         Ok(None)
@@ -123,6 +136,10 @@ impl VfsEngine for PlaceholderEngine {
         Ok(())
     }
     async fn stats(&self) -> EngineStats {
-        EngineStats { transfers: 0, queue_depth: 0, errors: 0 }
+        EngineStats {
+            transfers: 0,
+            queue_depth: 0,
+            errors: 0,
+        }
     }
 }
