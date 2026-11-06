@@ -13,6 +13,27 @@ pub enum StoreError {
 
 pub type Result<T> = std::result::Result<T, StoreError>;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeState {
+    Placeholder,
+    Hydrating,
+    Cached,
+    Dirty,
+    Conflict,
+}
+
+impl NodeState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Placeholder => "placeholder",
+            Self::Hydrating => "hydrating",
+            Self::Cached => "cached",
+            Self::Dirty => "dirty",
+            Self::Conflict => "conflict",
+        }
+    }
+}
+
 pub struct Store;
 
 impl Store {
@@ -21,6 +42,7 @@ impl Store {
     }
 
     pub fn migrate(&self) -> Result<()> {
+        // Apply SCHEMA_SQL via rusqlite when wired
         Ok(())
     }
 }
@@ -41,7 +63,7 @@ pub struct Node {
     pub head_revision: Option<String>,
     pub trashed: bool,
     pub shared_drive_id: Option<String>,
-    pub state: String,
+    pub state: NodeState,
     pub pinned: bool,
     pub last_access_ms: i64,
 }
