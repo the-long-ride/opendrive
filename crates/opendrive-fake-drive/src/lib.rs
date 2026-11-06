@@ -1,6 +1,4 @@
 //! In-process fake Drive v3 server for tests.
-//! Implements subset: files, changes, export, resumable upload, shared drives +
-//! fault injection (429/5xx, dropped connections, duplicate names, revoked tokens).
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -61,5 +59,33 @@ impl FakeDrive {
 impl Default for FakeDrive {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn root_exists() {
+        let drive = FakeDrive::new();
+        assert!(drive.files.lock().unwrap().contains_key("root"));
+    }
+
+    #[test]
+    fn add_and_list() {
+        let drive = FakeDrive::new();
+        drive.add_file(FakeFile {
+            id: "f1".into(),
+            name: "hello.txt".into(),
+            mime_type: "text/plain".into(),
+            size: 5,
+            parents: vec!["root".into()],
+            trashed: false,
+            content: b"hello".to_vec(),
+        });
+        let kids = drive.list_children("root");
+        assert_eq!(kids.len(), 1);
+        assert_eq!(kids[0].name, "hello.txt");
     }
 }
