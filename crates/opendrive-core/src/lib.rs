@@ -73,3 +73,44 @@ pub enum CoreError {
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
+
+/// In-memory account registry (persisted later via store).
+#[derive(Debug, Default)]
+pub struct AccountManager {
+    accounts: Vec<Account>,
+    credentials: Vec<CredentialSet>,
+}
+
+impl AccountManager {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add_credential(&mut self, set: CredentialSet) {
+        self.credentials.push(set);
+    }
+
+    pub fn add_account(&mut self, account: Account) {
+        self.accounts.push(account);
+    }
+
+    pub fn get_account(&self, id: Uuid) -> Result<&Account> {
+        self.accounts
+            .iter()
+            .find(|a| a.id == id)
+            .ok_or(CoreError::AccountNotFound(id))
+    }
+
+    pub fn list_accounts(&self) -> &[Account] {
+        &self.accounts
+    }
+
+    pub fn remove_account(&mut self, id: Uuid) -> Result<()> {
+        let before = self.accounts.len();
+        self.accounts.retain(|a| a.id != id);
+        if self.accounts.len() == before {
+            return Err(CoreError::AccountNotFound(id));
+        }
+        Ok(())
+    }
+}
