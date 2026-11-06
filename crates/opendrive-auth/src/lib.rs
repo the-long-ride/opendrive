@@ -1,4 +1,11 @@
 //! OAuth loopback + PKCE, token store (keyring).
+//!
+//! Flow (design §7.3):
+//! 1. Generate PKCE verifier/challenge (S256) + state
+//! 2. Listen on 127.0.0.1:<ephemeral>
+//! 3. Open browser → accounts.google.com with scope, access_type=offline, prompt=consent
+//! 4. Exchange code + verifier for tokens
+//! 5. Store refresh_token in keychain; access_token in memory
 
 use thiserror::Error;
 use uuid::Uuid;
@@ -32,21 +39,16 @@ impl AuthClient {
         }
     }
 
-    /// Authorization-code + PKCE (S256) + loopback redirect.
-    /// Opens system browser; listens on 127.0.0.1 ephemeral port.
     pub async fn authorize(&self, read_only: bool) -> Result<(String, String)> {
         let _scope = if read_only {
             "https://www.googleapis.com/auth/drive.readonly"
         } else {
             "https://www.googleapis.com/auth/drive"
         };
-        // TODO: generate PKCE verifier/challenge, state, start tokio TcpListener,
-        // open browser to accounts.google.com/o/oauth2/v2/auth, exchange code.
         Err(AuthError::OAuth("not implemented".into()))
     }
 
     pub async fn refresh(&self, _refresh_token: &str) -> Result<String> {
-        // TODO: POST token endpoint with client_id/secret + refresh_token
         Err(AuthError::OAuth("not implemented".into()))
     }
 }

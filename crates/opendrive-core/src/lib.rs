@@ -10,6 +10,14 @@ pub struct CredentialSet {
     pub client_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AccountStatus {
+    Connected,
+    Paused,
+    NeedsReauth,
+    Error,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
     pub id: Uuid,
@@ -19,6 +27,7 @@ pub struct Account {
     pub folder_name: String,
     pub read_only: bool,
     pub enabled: bool,
+    pub status: AccountStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
