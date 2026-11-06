@@ -7,6 +7,10 @@
 //! 4. Exchange code + verifier for tokens
 //! 5. Store refresh_token in keychain; access_token in memory
 
+mod loopback;
+
+pub use loopback::{wait_for_redirect, LoopbackError, RedirectParams};
+
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -22,6 +26,8 @@ pub enum AuthError {
     Timeout,
     #[error("state mismatch")]
     StateMismatch,
+    #[error(transparent)]
+    Loopback(#[from] LoopbackError),
 }
 
 pub type Result<T> = std::result::Result<T, AuthError>;
@@ -45,6 +51,7 @@ impl AuthClient {
         } else {
             "https://www.googleapis.com/auth/drive"
         };
+        // TODO: PKCE + wait_for_redirect + token exchange
         Err(AuthError::OAuth("not implemented".into()))
     }
 
