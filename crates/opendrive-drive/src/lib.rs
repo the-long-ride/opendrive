@@ -29,7 +29,6 @@ impl DriveClient {
     }
 
     pub async fn about(&self) -> Result<About> {
-        // GET https://www.googleapis.com/drive/v3/about?fields=user,storageQuota
         Err(DriveError::Other("not implemented".into()))
     }
 
@@ -39,12 +38,10 @@ impl DriveClient {
         _page_token: Option<&str>,
         _supports_all_drives: bool,
     ) -> Result<FileList> {
-        // files.list with restricted fields mask + paging
         Err(DriveError::Other("not implemented".into()))
     }
 
     pub async fn changes(&self, _page_token: &str) -> Result<ChangeList> {
-        // changes.list
         Err(DriveError::Other("not implemented".into()))
     }
 
@@ -58,15 +55,10 @@ impl DriveClient {
         _offset: u64,
         _len: u32,
     ) -> Result<Bytes> {
-        // Range request + read-ahead
         Err(DriveError::Other("not implemented".into()))
     }
 
-    pub async fn create_resumable(
-        &self,
-        _metadata: &serde_json::Value,
-    ) -> Result<String> {
-        // returns session URI
+    pub async fn create_resumable(&self, _metadata: &serde_json::Value) -> Result<String> {
         Err(DriveError::Other("not implemented".into()))
     }
 
@@ -90,6 +82,11 @@ impl DriveClient {
         _patch: &serde_json::Value,
     ) -> Result<DriveFile> {
         Err(DriveError::Other("not implemented".into()))
+    }
+
+    /// Google-native Docs/Sheets/Slides → browser link (default) or Office export.
+    pub fn native_doc_link(file_id: &str) -> String {
+        format!("https://drive.google.com/open?id={file_id}")
     }
 }
 
@@ -131,4 +128,13 @@ pub struct Change {
     pub file_id: String,
     pub removed: bool,
     pub file: Option<DriveFile>,
+}
+
+pub fn is_native_google_doc(mime: &str) -> bool {
+    matches!(
+        mime,
+        "application/vnd.google-apps.document"
+            | "application/vnd.google-apps.spreadsheet"
+            | "application/vnd.google-apps.presentation"
+    )
 }
