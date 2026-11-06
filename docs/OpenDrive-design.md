@@ -1,24 +1,29 @@
-# OpenDrive — Design Document
+# OpenDrive — Design Document (v0.2)
 
-> Status: **Draft v0.2** · License: **MIT** · Language: **Rust** · UI: **GPUI** · Platforms: **Windows, macOS, Linux**
->
-> Full design is in the original attachment / local `docs/OpenDrive-design.md` (37 KB). Key points below.
+The full design document (37 KB) was provided as the project attachment.
 
-## Summary
+**Source of truth:** keep `OpenDrive-design.md` from the original conversation attachment in this `docs/` folder when cloning, or request the maintainers to upload the complete file.
 
-Multi-account Google Drive desktop client. Unlimited accounts under one root. Native Rust VFS engine (no rclone). Per-OS frontends: Windows Cloud Files, Linux FUSE3, macOS localhost NFS. BYO OAuth credentials. MIT. No telemetry.
+## Quick reference
 
-## Workspace layout
-
-See root README and crates/.
+| Item | Choice |
+|------|--------|
+| Engine | Native Rust `VfsEngine` (no rclone) |
+| Windows | Cloud Files API (`cloud-filter`) |
+| Linux | FUSE3 (`fuser`) |
+| macOS | localhost NFSv3 (`nfsserve`) |
+| UI | GPUI |
+| Auth | BYO OAuth client + PKCE loopback |
+| DB | SQLite (rusqlite, WAL) |
+| License | MIT |
 
 ## Milestones
 
-- **M0** Spike: OAuth, FUSE/Cloud Files/NFS hello-world, GPUI window
-- **M1** Reference engine (Linux)
+- **M0** Spike (OAuth, FUSE/CFAPI/NFS hello-world, GPUI)
+- **M1** Reference engine on Linux
 - **M2** Windows frontend
 - **M3** macOS frontend
-- **M4** Product (wizard, packaging, CI/release) → Alpha
-- **M5** Polish → Beta
+- **M4** Product / Alpha
+- **M5** Polish / Beta
 
-See original design for full sections 1–17 (architecture, sync invariants, dependency policy, CI, open questions).
+See original design for architecture, safety invariants, dependency policy, CI/CD, open questions Q1–Q10.
