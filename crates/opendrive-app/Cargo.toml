@@ -1,0 +1,17 @@
+[package]
+name = "opendrive-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "opendrive"
+path = "src/main.rs"
+
+[dependencies]
+opendrive-core = { path = "../opendrive-core" }
+opendrive-sync = { path = "../opendrive-sync" }
+opendrive-platform = { path = "../opendrive-platform" }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }

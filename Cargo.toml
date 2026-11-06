@@ -1,0 +1,36 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/opendrive-app",
+    "crates/opendrive-core",
+    "crates/opendrive-auth",
+    "crates/opendrive-drive",
+    "crates/opendrive-store",
+    "crates/opendrive-sync",
+    "crates/opendrive-fs-windows",
+    "crates/opendrive-fs-linux",
+    "crates/opendrive-fs-macos",
+    "crates/opendrive-platform",
+    "crates/opendrive-fake-drive",
+]
+default-members = ["crates/opendrive-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["OpenDrive Contributors"]
+repository = "https://github.com/the-long-ride/opendrive"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+bytes = "1"
+parking_lot = "0.12"
