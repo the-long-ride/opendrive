@@ -50,9 +50,28 @@ impl FakeDrive {
             .collect()
     }
 
+    pub fn get_file(&self, id: &str) -> Option<FakeFile> {
+        self.files.lock().unwrap().get(id).cloned()
+    }
+
     pub fn add_file(&self, file: FakeFile) {
         self.files.lock().unwrap().insert(file.id.clone(), file);
         *self.change_token.lock().unwrap() += 1;
+    }
+
+    pub fn trash(&self, id: &str) -> bool {
+        let mut files = self.files.lock().unwrap();
+        if let Some(f) = files.get_mut(id) {
+            f.trashed = true;
+            *self.change_token.lock().unwrap() += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn current_change_token(&self) -> u64 {
+        *self.change_token.lock().unwrap()
     }
 }
 
@@ -69,12 +88,13 @@ mod tests {
     #[test]
     fn root_exists() {
         let drive = FakeDrive::new();
-        assert!(drive.files.lock().unwrap().contains_key("root"));
+        assert!(drive.get_file("root").is_some());
     }
 
     #[test]
-    fn add_and_list() {
+    fn add_list_trash() {
         let drive = FakeDrive::new();
+        let t0 = drive.current_change_token();
         drive.add_file(FakeFile {
             id: "f1".into(),
             name: "hello.txt".into(),
@@ -84,8 +104,9 @@ mod tests {
             trashed: false,
             content: b"hello".to_vec(),
         });
-        let kids = drive.list_children("root");
-        assert_eq!(kids.len(), 1);
-        assert_eq!(kids[0].name, "hello.txt");
+        assert!(drive.current_change_token() > t0);
+        assert_eq!(drive.list_children("root").len(), 1);
+        assert!(drive.trash("f1"));
+        assert!(drive.list_children("root").is_empty());
     }
 }
