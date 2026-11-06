@@ -1,0 +1,53 @@
+[package]
+name = "opendrive-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "opendrive"
+path = "src/main.rs"
+
+[features]
+default = []
+# System tray: cargo run -p opendrive-app --features tray -- tray
+tray = ["dep:tray-icon", "dep:winit"]
+
+[dependencies]
+opendrive-core = { path = "../opendrive-core" }
+opendrive-sync = { path = "../opendrive-sync" }
+opendrive-store = { path = "../opendrive-store" }
+opendrive-auth = { path = "../opendrive-auth" }
+opendrive-drive = { path = "../opendrive-drive" }
+opendrive-platform = { path = "../opendrive-platform" }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = "0.3"
+anyhow = { workspace = true }
+uuid = { workspace = true }
+eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts", "clipboard", "x11", "wayland"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal"] }
+tray-icon = { version = "0.19", optional = true }
+winit = { version = "0.30", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+opendrive-fs-linux = { path = "../opendrive-fs-linux" }
+
+[target.'cfg(windows)'.dependencies]
+opendrive-fs-windows = { path = "../opendrive-fs-windows" }
+tray-icon = "0.19"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+opendrive-fs-macos = { path = "../opendrive-fs-macos" }
+tray-icon = "0.19"
+
+[dev-dependencies]
+opendrive-fake-drive = { path = "../opendrive-fake-drive" }
+url = { workspace = true }

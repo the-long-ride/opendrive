@@ -1,0 +1,303 @@
+name: Release
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0; defaults to Cargo.toml version)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      version: ${{ steps.ver.outputs.version }}
+      ref_sha: ${{ steps.ver.outputs.ref_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: ver
+        shell: bash
+        run: |
+          CARGO_VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            if [ -z "$TAG" ]; then
+              TAG="v${CARGO_VER}"
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VER="${TAG#v}"
+          if [ "$VER" != "$CARGO_VER" ]; then
+            echo "Version mismatch: Cargo.toml=$CARGO_VER vs tag=$TAG"
+            exit 1
+          fi
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            TARGET_SHA=$(git rev-parse "${TAG}^{commit}")
+          else
+            TARGET_SHA=$(git rev-parse HEAD)
+          fi
+          if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+            echo "Tag/commit $TARGET_SHA is not on main"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "ref_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    needs: gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.ref_sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - run: cargo build -p opendrive-app --release --locked --target x86_64-pc-windows-msvc
+      - name: Package portable ZIP and NSIS installer
+        shell: pwsh
+        run: |
+          $tag = "${{ needs.gate.outputs.tag }}"
+          $ver = "${{ needs.gate.outputs.version }}"
+          $bin = "target/x86_64-pc-windows-msvc/release/opendrive.exe"
+          New-Item -ItemType Directory -Force dist/portable | Out-Null
+          Copy-Item $bin dist/portable/opendrive.exe
+          Copy-Item README.md, PRIVACY.md dist/portable/
+          Compress-Archive -Path dist/portable/* -DestinationPath "dist/opendrive-$tag-windows-x86_64-portable.zip" -Force
+
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          if (-not $makensis -and (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) {
+            $env:PATH += ";C:\Program Files (x86)\NSIS"
+            $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          }
+          if (-not $makensis) {
+            choco install nsis -y
+            $env:PATH += ";C:\Program Files (x86)\NSIS"
+          }
+          @'
+          !define APPNAME "OpenDrive"
+          !define VERSION "__VER__"
+          Name "${APPNAME} ${VERSION}"
+          OutFile "dist\opendrive-__TAG__-windows-x86_64-setup.exe"
+          InstallDir "$LOCALAPPDATA\OpenDrive"
+          RequestExecutionLevel user
+          Page directory
+          Page instfiles
+          UninstPage uninstConfirm
+          UninstPage instfiles
+          Section "Install"
+            SetOutPath "$INSTDIR"
+            File "dist\portable\opendrive.exe"
+            File "README.md"
+            File "PRIVACY.md"
+            WriteUninstaller "$INSTDIR\Uninstall.exe"
+            CreateShortCut "$DESKTOP\OpenDrive.lnk" "$INSTDIR\opendrive.exe"
+            CreateDirectory "$SMPROGRAMS\OpenDrive"
+            CreateShortCut "$SMPROGRAMS\OpenDrive\OpenDrive.lnk" "$INSTDIR\opendrive.exe"
+            CreateShortCut "$SMPROGRAMS\OpenDrive\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+          SectionEnd
+          Section "Uninstall"
+            Delete "$DESKTOP\OpenDrive.lnk"
+            RMDir /r "$SMPROGRAMS\OpenDrive"
+            RMDir /r "$INSTDIR"
+          SectionEnd
+          '@.Replace("__VER__", $ver).Replace("__TAG__", $tag) | Set-Content -Encoding UTF8 installer.nsi
+          makensis installer.nsi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-windows
+          path: |
+            dist/opendrive-*-windows-x86_64-portable.zip
+            dist/opendrive-*-windows-x86_64-setup.exe
+
+  build-linux:
+    needs: gate
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.ref_sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - run: cargo build -p opendrive-app --release --locked --target x86_64-unknown-linux-gnu
+      - name: Package tarball, Debian (.deb), and AppImage
+        shell: bash
+        run: |
+          TAG="${{ needs.gate.outputs.tag }}"
+          VER="${{ needs.gate.outputs.version }}"
+          BIN="target/x86_64-unknown-linux-gnu/release/opendrive"
+          mkdir -p dist/portable
+          cp "$BIN" README.md PRIVACY.md dist/portable/
+          tar -C dist/portable -czf "dist/opendrive-${TAG}-linux-x86_64.tar.gz" .
+
+          DEB_ROOT="dist/deb/opendrive_${VER}_amd64"
+          mkdir -p "${DEB_ROOT}/DEBIAN" "${DEB_ROOT}/usr/bin" "${DEB_ROOT}/usr/share/applications"
+          install -m 0755 "$BIN" "${DEB_ROOT}/usr/bin/opendrive"
+          cat > "${DEB_ROOT}/DEBIAN/control" <<EOF
+          Package: opendrive
+          Version: ${VER}
+          Section: net
+          Priority: optional
+          Architecture: amd64
+          Maintainer: OpenDrive Contributors
+          Description: Pure-Rust multi-account Google Drive desktop client
+          EOF
+          cat > "${DEB_ROOT}/usr/share/applications/opendrive.desktop" <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=OpenDrive
+          Exec=opendrive
+          Categories=Network;FileTransfer;
+          Terminal=false
+          EOF
+          dpkg-deb --build "$DEB_ROOT" "dist/opendrive_${VER}_amd64.deb"
+
+          APPDIR="dist/OpenDrive.AppDir"
+          mkdir -p "${APPDIR}/usr/bin"
+          install -m 0755 "$BIN" "${APPDIR}/usr/bin/opendrive"
+          cp "${DEB_ROOT}/usr/share/applications/opendrive.desktop" "${APPDIR}/opendrive.desktop"
+          cp docs/assets/opendrive-logo.svg "${APPDIR}/opendrive.svg"
+          cat > "${APPDIR}/AppRun" <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/opendrive" "$@"
+          EOF
+          chmod +x "${APPDIR}/AppRun"
+          curl -fsSL -o /tmp/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+          ARCH=x86_64 /tmp/appimagetool --appimage-extract-and-run "$APPDIR" "dist/opendrive-${TAG}-linux-x86_64.AppImage"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-linux
+          path: |
+            dist/opendrive-*-linux-x86_64.tar.gz
+            dist/opendrive_*_amd64.deb
+            dist/opendrive-*-linux-x86_64.AppImage
+
+  build-macos:
+    needs: gate
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.ref_sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - run: cargo build -p opendrive-app --release --locked --target aarch64-apple-darwin
+      - name: Package portable ZIP and DMG installer
+        shell: bash
+        run: |
+          TAG="${{ needs.gate.outputs.tag }}"
+          VER="${{ needs.gate.outputs.version }}"
+          BIN="target/aarch64-apple-darwin/release/opendrive"
+          mkdir -p dist/portable
+          cp "$BIN" README.md PRIVACY.md dist/portable/
+          ditto -c -k --keepParent dist/portable "dist/opendrive-${TAG}-macos-arm64-portable.zip"
+
+          APP_DIR="dist/dmg/OpenDrive.app"
+          mkdir -p "${APP_DIR}/Contents/MacOS" "${APP_DIR}/Contents/Resources"
+          cp "$BIN" "${APP_DIR}/Contents/MacOS/opendrive"
+          chmod +x "${APP_DIR}/Contents/MacOS/opendrive"
+          cat > "${APP_DIR}/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>OpenDrive</string>
+            <key>CFBundleIdentifier</key><string>dev.opendrive.app</string>
+            <key>CFBundleVersion</key><string>${VER}</string>
+            <key>CFBundleShortVersionString</key><string>${VER}</string>
+            <key>CFBundleExecutable</key><string>opendrive</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+          </dict></plist>
+          EOF
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "OpenDrive ${TAG}" -srcfolder dist/dmg -ov -format UDZO "dist/opendrive-${TAG}-macos-arm64-installer.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: assets-macos
+          path: |
+            dist/opendrive-*-macos-arm64-portable.zip
+            dist/opendrive-*-macos-arm64-installer.dmg
+
+  publish:
+    needs: [gate, build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Generate checksums, release notes, and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          TAG="${{ needs.gate.outputs.tag }}"
+          VER="${{ needs.gate.outputs.version }}"
+          REF_SHA="${{ needs.gate.outputs.ref_sha }}"
+          (cd release-assets && sha256sum * > SHA256SUMS.txt)
+
+          CHANGELOG_BODY=$(awk -v tag="$TAG" -v ver="$VER" '
+            $0 ~ "^## \\[" tag "\\]" || $0 ~ "^## \\[" ver "\\]" || $0 ~ "^## " tag { flag=1; next }
+            flag && $0 ~ "^## " { exit }
+            flag { print }
+          ' CHANGELOG.md)
+          if [ -z "$CHANGELOG_BODY" ]; then
+            CHANGELOG_BODY="Release ${TAG}."
+          fi
+
+          PREV_TAG=$(git describe --tags --abbrev=0 "${REF_SHA}^" 2>/dev/null || true)
+          if [ -n "$PREV_TAG" ]; then
+            CONTRIB=$(git log "${PREV_TAG}..${REF_SHA}" --format="- %an" | sort -u)
+          else
+            CONTRIB=$(git log "${REF_SHA}" --format="- %an" | sort -u)
+          fi
+
+          {
+            echo "Change log for version ${TAG}:"
+            echo "<details>"
+            echo "<summary>Release notes for ${TAG}</summary>"
+            echo ""
+            echo "$CHANGELOG_BODY"
+            echo ""
+            echo "</details>"
+            echo ""
+            echo "Download assets:"
+            echo "| OS | Package | File |"
+            echo "|---|---|---|"
+            echo "| Windows (x86_64) | NSIS Installer | \`opendrive-${TAG}-windows-x86_64-setup.exe\` |"
+            echo "| Windows (x86_64) | Portable ZIP | \`opendrive-${TAG}-windows-x86_64-portable.zip\` |"
+            echo "| macOS (Apple Silicon) | DMG Installer | \`opendrive-${TAG}-macos-arm64-installer.dmg\` |"
+            echo "| macOS (Apple Silicon) | Portable ZIP | \`opendrive-${TAG}-macos-arm64-portable.zip\` |"
+            echo "| Linux (x86_64) | AppImage | \`opendrive-${TAG}-linux-x86_64.AppImage\` |"
+            echo "| Linux (x86_64) | Debian (.deb) | \`opendrive_${VER}_amd64.deb\` |"
+            echo "| Linux (x86_64) | Portable Tarball | \`opendrive-${TAG}-linux-x86_64.tar.gz\` |"
+            echo "| All | Checksums | \`SHA256SUMS.txt\` |"
+            echo ""
+            echo "Contributors:"
+            echo "$CONTRIB"
+          } > release-notes.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "OpenDrive ${TAG}" --notes-file release-notes.md
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* --target "$REF_SHA" --title "OpenDrive ${TAG}" --notes-file release-notes.md
+          fi

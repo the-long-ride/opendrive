@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "OpenDrive: Desktop App",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/launch-desktop.mjs",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"],
+      "env": {
+        "RUST_LOG": "info,opendrive=debug",
+        "RUST_BACKTRACE": "1"
+      }
+    }
+  ]
+}

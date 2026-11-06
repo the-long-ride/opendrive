@@ -1,0 +1,19 @@
+[package]
+name = "opendrive-fs-windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+opendrive-sync = { path = "../opendrive-sync" }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+cloud-filter = "0.0.7"
+
+[dev-dependencies]
+opendrive-store = { path = "../opendrive-store" }
+uuid = { workspace = true }
