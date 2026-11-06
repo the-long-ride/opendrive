@@ -8,8 +8,10 @@
 //! 5. Store refresh_token in keychain; access_token in memory
 
 mod loopback;
+mod pkce;
 
 pub use loopback::{wait_for_redirect, LoopbackError, RedirectParams};
+pub use pkce::{generate_pkce, random_state, PkceError, PkcePair};
 
 use thiserror::Error;
 use uuid::Uuid;
@@ -28,6 +30,8 @@ pub enum AuthError {
     StateMismatch,
     #[error(transparent)]
     Loopback(#[from] LoopbackError),
+    #[error(transparent)]
+    Pkce(#[from] PkceError),
 }
 
 pub type Result<T> = std::result::Result<T, AuthError>;
@@ -51,7 +55,9 @@ impl AuthClient {
         } else {
             "https://www.googleapis.com/auth/drive"
         };
-        // TODO: PKCE + wait_for_redirect + token exchange
+        let _pkce = generate_pkce()?;
+        let _state = random_state();
+        // TODO: wait_for_redirect + token exchange
         Err(AuthError::OAuth("not implemented".into()))
     }
 
