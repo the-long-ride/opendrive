@@ -7,6 +7,10 @@
 //! 4. Remote changes never clobber unsynced local edits (conflict copy).
 //! 5. Quit waits for or reports pending uploads.
 
+mod queue;
+
+pub use queue::{conflict_name, QueueEntry, UploadOp};
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::ffi::OsStr;
@@ -90,7 +94,6 @@ pub enum SyncError {
 
 pub type Result<T> = std::result::Result<T, SyncError>;
 
-/// Placeholder engine for M0 scaffolding. Real engine lands in M1.
 pub struct PlaceholderEngine;
 
 #[async_trait]
@@ -141,5 +144,18 @@ impl VfsEngine for PlaceholderEngine {
             queue_depth: 0,
             errors: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conflict_name_format() {
+        assert_eq!(
+            conflict_name("file.txt", "host", "2026-01-01"),
+            "file.txt (conflict host 2026-01-01)"
+        );
     }
 }
