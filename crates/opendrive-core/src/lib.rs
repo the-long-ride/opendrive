@@ -74,7 +74,6 @@ pub enum CoreError {
 
 pub type Result<T> = std::result::Result<T, CoreError>;
 
-/// In-memory account registry (persisted later via store).
 #[derive(Debug, Default)]
 pub struct AccountManager {
     accounts: Vec<Account>,
@@ -112,5 +111,31 @@ impl AccountManager {
             return Err(CoreError::AccountNotFound(id));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_get_remove() {
+        let mut mgr = AccountManager::new();
+        let id = Uuid::new_v4();
+        let cred = Uuid::new_v4();
+        mgr.add_account(Account {
+            id,
+            nickname: "Work".into(),
+            email: "a@b.c".into(),
+            credential_set_id: cred,
+            folder_name: "Work".into(),
+            read_only: false,
+            enabled: true,
+            status: AccountStatus::Connected,
+        });
+        assert_eq!(mgr.list_accounts().len(), 1);
+        assert_eq!(mgr.get_account(id).unwrap().email, "a@b.c");
+        mgr.remove_account(id).unwrap();
+        assert!(mgr.get_account(id).is_err());
     }
 }
