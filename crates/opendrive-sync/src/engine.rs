@@ -1,14 +1,15 @@
 //! Store-backed VfsEngine (M0/M1).
 
-use crate::queue::{conflict_name, QueueEntry, UploadOp};
 use crate::{
     DirPage, EngineEvent, EngineStats, Kind, NodeAttr, NodeId, PageToken, Result, SyncError,
     VfsEngine, WriteHandle,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
+use opendrive_drive::DriveClient;
 use opendrive_store::{Node, NodeState, Store};
 use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -16,6 +17,8 @@ use uuid::Uuid;
 
 pub struct SyncEngine {
     store: Arc<Mutex<Store>>,
+    /// account_id -> DriveClient (access token)
+    clients: Mutex<HashMap<Uuid, DriveClient>>,
     events: Mutex<Option<mpsc::Sender<EngineEvent>>>,
 }
 
@@ -23,13 +26,17 @@ impl SyncEngine {
     pub fn new(store: Store) -> Self {
         Self {
             store: Arc::new(Mutex::new(store)),
+            clients: Mutex::new(HashMap::new()),
             events: Mutex::new(None),
         }
     }
 
+    pub fn set_drive_client(&self, account_id: Uuid, client: DriveClient) {
+        self.clients.lock().insert(account_id, client);
+    }
+
     pub fn seed_root_account(&self, account_id: Uuid, folder_name: &str) -> Result<NodeId> {
         let store = self.store.lock();
-        // node id 1 = account folder under synthetic root 0
         let n = Node {
             id: 1,
             account_id,
@@ -51,6 +58,65 @@ impl SyncEngine {
         };
         store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
         Ok(1)
+    }
+
+    /// Pull one folder page from Drive into the store.
+    pub async fn hydrate_folder(&self, account_id: Uuid, parent_node: NodeId) -> Result<()> {
+        let (drive_parent, next_id_base) = {
+            let store = self.store.lock();
+            let n = store
+                .get_node(parent_node as i64)
+                .map_err(|e| SyncError::Other(e.to_string()))?
+                .ok_or(SyncError::NotFound)?;
+            (n.drive_id.clone(), parent_node as i64 * 1000 + 10)
+        };
+
+        let client = {
+            let clients = self.clients.lock();
+            clients
+                .get(&account_id)
+                .ok_or_else(|| SyncError::Other("no drive client".into()))?
+                .access_token
+                .clone()
+        };
+        let client = DriveClient::new(client);
+
+        let list = client
+            .list_files(&drive_parent, None, true)
+            .await
+            .map_err(|e| SyncError::Other(e.to_string()))?;
+
+        let store = self.store.lock();
+        for (i, f) in list.files.into_iter().enumerate() {
+            let kind = if f.mime_type == "application/vnd.google-apps.folder" {
+                "folder"
+            } else if opendrive_drive::is_native_google_doc(&f.mime_type) {
+                "native_doc"
+            } else {
+                "file"
+            };
+            let n = Node {
+                id: next_id_base + i as i64,
+                account_id,
+                drive_id: f.id,
+                parent_id: Some(parent_node as i64),
+                name: f.name.clone(),
+                display_name: f.name,
+                kind: kind.into(),
+                mime: Some(f.mime_type),
+                size: f.size.unwrap_or(0) as i64,
+                md5: f.md5,
+                modified_ms: 0,
+                head_revision: f.head_revision_id,
+                trashed: f.trashed,
+                shared_drive_id: None,
+                state: NodeState::Placeholder,
+                pinned: false,
+                last_access_ms: 0,
+            };
+            store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
+        }
+        Ok(())
     }
 }
 
@@ -103,9 +169,28 @@ impl VfsEngine for SyncEngine {
             .ok_or(SyncError::NotFound)
     }
 
-    async fn read(&self, _node: NodeId, _offset: u64, _len: u32) -> Result<Bytes> {
-        // hydration via DriveClient later
-        Err(SyncError::Other("hydration not implemented".into()))
+    async fn read(&self, node: NodeId, offset: u64, len: u32) -> Result<Bytes> {
+        let (account_id, drive_id) = {
+            let store = self.store.lock();
+            let n = store
+                .get_node(node as i64)
+                .map_err(|e| SyncError::Other(e.to_string()))?
+                .ok_or(SyncError::NotFound)?;
+            (n.account_id, n.drive_id.clone())
+        };
+        let token = {
+            let clients = self.clients.lock();
+            clients
+                .get(&account_id)
+                .ok_or_else(|| SyncError::Other("no drive client".into()))?
+                .access_token
+                .clone()
+        };
+        let client = DriveClient::new(token);
+        client
+            .download_range(&drive_id, offset, len)
+            .await
+            .map_err(|e| SyncError::Io(e.to_string()))
     }
 
     async fn open_write(&self, node: NodeId) -> Result<WriteHandle> {
@@ -118,8 +203,8 @@ impl VfsEngine for SyncEngine {
         let id = (std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_nanos()%
-            i64::MAX as u128) as i64;
+            .as_nanos()
+            % i64::MAX as u128) as i64;
         let n = Node {
             id,
             account_id: Uuid::nil(),
@@ -199,12 +284,4 @@ impl VfsEngine for SyncEngine {
             errors: 0,
         }
     }
-}
-
-// silence unused imports in this module until queue is wired deeper
-#[allow(dead_code)]
-fn _queue_touch() {
-    let _ = conflict_name("a", "h", "d");
-    let _ = UploadOp::Create;
-    let _ = std::mem::size_of::<QueueEntry>();
 }

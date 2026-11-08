@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 opendrive-core = { path = "../opendrive-core" }
 opendrive-store = { path = "../opendrive-store" }
+opendrive-drive = { path = "../opendrive-drive" }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
