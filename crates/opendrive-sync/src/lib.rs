@@ -9,10 +9,12 @@
 
 mod engine;
 mod queue;
+mod staging;
 mod worker;
 
 pub use engine::SyncEngine;
 pub use queue::{conflict_name, QueueEntry, UploadOp};
+pub use staging::{StagingDir, StagingError};
 
 use async_trait::async_trait;
 use bytes::Bytes;
