@@ -12,8 +12,11 @@ path = "src/main.rs"
 opendrive-core = { path = "../opendrive-core" }
 opendrive-sync = { path = "../opendrive-sync" }
 opendrive-store = { path = "../opendrive-store" }
+opendrive-auth = { path = "../opendrive-auth" }
+opendrive-drive = { path = "../opendrive-drive" }
 opendrive-platform = { path = "../opendrive-platform" }
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-subscriber = "0.3"
 anyhow = { workspace = true }
 uuid = { workspace = true }
