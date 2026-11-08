@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const SERVICE: &str = "opendrive";
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -81,13 +82,15 @@ impl AuthClient {
         u.to_string()
     }
 
-    /// Returns (access_token, refresh_token). Email comes from Drive about() later.
+    /// Browser flow: bind → open browser → wait → exchange.
+    /// Returns (access_token, refresh_token).
     pub async fn authorize(&self, read_only: bool) -> Result<(String, String)> {
         let pkce = generate_pkce()?;
         let state = random_state();
         let (listener, redirect_uri, _) = bind_loopback().await?;
         let auth_url = self.authorization_url(&redirect_uri, &pkce.challenge, &state, read_only);
-        tracing::info!(%auth_url, "open this URL in a browser to sign in");
+        open::that(&auth_url).map_err(|e| AuthError::OAuth(format!("open browser: {e}")))?;
+        tracing::info!(%auth_url, "opened browser for sign-in");
         let redirect = wait_for_redirect(listener, &state, 180).await?;
         self.exchange_code(&redirect.code, &pkce.verifier, &redirect_uri)
             .await
@@ -161,18 +164,42 @@ impl AuthClient {
     }
 }
 
-pub fn store_refresh_token(_account_id: Uuid, _token: &str) -> Result<()> {
-    Ok(())
+fn entry(user: &str) -> Result<keyring::Entry> {
+    keyring::Entry::new(SERVICE, user).map_err(|e| AuthError::Keychain(e.to_string()))
 }
 
-pub fn load_refresh_token(_account_id: Uuid) -> Result<Option<String>> {
-    Ok(None)
+pub fn store_refresh_token(account_id: Uuid, token: &str) -> Result<()> {
+    entry(&format!("acct/{account_id}/refresh_token"))?
+        .set_password(token)
+        .map_err(|e| AuthError::Keychain(e.to_string()))
 }
 
-pub fn store_client_secret(_cred_id: Uuid, _secret: &str) -> Result<()> {
-    Ok(())
+pub fn load_refresh_token(account_id: Uuid) -> Result<Option<String>> {
+    match entry(&format!("acct/{account_id}/refresh_token"))?.get_password() {
+        Ok(p) => Ok(Some(p)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(AuthError::Keychain(e.to_string())),
+    }
 }
 
-pub fn load_client_secret(_cred_id: Uuid) -> Result<Option<String>> {
-    Ok(None)
+pub fn delete_refresh_token(account_id: Uuid) -> Result<()> {
+    match entry(&format!("acct/{account_id}/refresh_token"))?.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(AuthError::Keychain(e.to_string())),
+    }
+}
+
+pub fn store_client_secret(cred_id: Uuid, secret: &str) -> Result<()> {
+    entry(&format!("cred/{cred_id}/secret"))?
+        .set_password(secret)
+        .map_err(|e| AuthError::Keychain(e.to_string()))
+}
+
+pub fn load_client_secret(cred_id: Uuid) -> Result<Option<String>> {
+    match entry(&format!("cred/{cred_id}/secret"))?.get_password() {
+        Ok(p) => Ok(Some(p)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(AuthError::Keychain(e.to_string())),
+    }
 }
