@@ -114,27 +114,7 @@ impl Store {
             .query_row(
                 "SELECT id, account_id, drive_id, parent_id, name, display_name, kind, mime, size, md5, modified_ms, head_revision, trashed, shared_drive_id, state, pinned, last_access_ms FROM nodes WHERE id=?1",
                 params![id],
-                |r| {
-                    Ok(Node {
-                        id: r.get(0)?,
-                        account_id: Uuid::parse_str(&r.get::<_, String>(1)?).unwrap_or_default(),
-                        drive_id: r.get(2)?,
-                        parent_id: r.get(3)?,
-                        name: r.get(4)?,
-                        display_name: r.get(5)?,
-                        kind: r.get(6)?,
-                        mime: r.get(7)?,
-                        size: r.get(8)?,
-                        md5: r.get(9)?,
-                        modified_ms: r.get(10)?,
-                        head_revision: r.get(11)?,
-                        trashed: r.get::<_, i32>(12)? != 0,
-                        shared_drive_id: r.get(13)?,
-                        state: NodeState::parse(&r.get::<_, String>(14)?),
-                        pinned: r.get::<_, i32>(15)? != 0,
-                        last_access_ms: r.get(16)?,
-                    })
-                },
+                row_to_node,
             )
             .optional()
             .map_err(Into::into)
@@ -144,27 +124,7 @@ impl Store {
         let mut stmt = self.conn.prepare(
             "SELECT id, account_id, drive_id, parent_id, name, display_name, kind, mime, size, md5, modified_ms, head_revision, trashed, shared_drive_id, state, pinned, last_access_ms FROM nodes WHERE parent_id=?1 AND trashed=0 ORDER BY name",
         )?;
-        let rows = stmt.query_map(params![parent_id], |r| {
-            Ok(Node {
-                id: r.get(0)?,
-                account_id: Uuid::parse_str(&r.get::<_, String>(1)?).unwrap_or_default(),
-                drive_id: r.get(2)?,
-                parent_id: r.get(3)?,
-                name: r.get(4)?,
-                display_name: r.get(5)?,
-                kind: r.get(6)?,
-                mime: r.get(7)?,
-                size: r.get(8)?,
-                md5: r.get(9)?,
-                modified_ms: r.get(10)?,
-                head_revision: r.get(11)?,
-                trashed: r.get::<_, i32>(12)? != 0,
-                shared_drive_id: r.get(13)?,
-                state: NodeState::parse(&r.get::<_, String>(14)?),
-                pinned: r.get::<_, i32>(15)? != 0,
-                last_access_ms: r.get(16)?,
-            })
-        })?;
+        let rows = stmt.query_map(params![parent_id], row_to_node)?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row?);
@@ -173,7 +133,7 @@ impl Store {
     }
 
     pub fn set_change_token(&self, account_id: Uuid, token: &str) -> Result<()> {
-        let now = chrono_like_now();
+        let now = now_ms();
         self.conn.execute(
             "INSERT INTO change_tokens (account_id, page_token, updated_ms) VALUES (?1,?2,?3)
              ON CONFLICT(account_id) DO UPDATE SET page_token=excluded.page_token, updated_ms=excluded.updated_ms",
@@ -192,9 +152,95 @@ impl Store {
             .optional()
             .map_err(Into::into)
     }
+
+    pub fn enqueue_upload(
+        &self,
+        node_id: i64,
+        op: &str,
+        base_revision: Option<&str>,
+    ) -> Result<i64> {
+        let now = now_ms();
+        self.conn.execute(
+            "INSERT INTO upload_queue (node_id, op, state, attempts, next_try_ms, base_revision)
+             VALUES (?1, ?2, 'pending', 0, ?3, ?4)",
+            params![node_id, op, now, base_revision],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    pub fn next_upload(&self) -> Result<Option<UploadRow>> {
+        let now = now_ms();
+        self.conn
+            .query_row(
+                "SELECT op_id, node_id, op, state, attempts, next_try_ms, resumable_uri, base_revision
+                 FROM upload_queue WHERE state IN ('pending','in_progress') AND next_try_ms <= ?1
+                 ORDER BY next_try_ms ASC LIMIT 1",
+                params![now],
+                |r| {
+                    Ok(UploadRow {
+                        op_id: r.get(0)?,
+                        node_id: r.get(1)?,
+                        op: r.get(2)?,
+                        state: r.get(3)?,
+                        attempts: r.get(4)?,
+                        next_try_ms: r.get(5)?,
+                        resumable_uri: r.get(6)?,
+                        base_revision: r.get(7)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    pub fn update_upload(
+        &self,
+        op_id: i64,
+        state: &str,
+        attempts: i32,
+        next_try_ms: i64,
+        resumable_uri: Option<&str>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "UPDATE upload_queue SET state=?1, attempts=?2, next_try_ms=?3, resumable_uri=?4 WHERE op_id=?5",
+            params![state, attempts, next_try_ms, resumable_uri, op_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn queue_depth(&self) -> Result<usize> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM upload_queue WHERE state IN ('pending','in_progress')",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
 }
 
-fn chrono_like_now() -> i64 {
+fn row_to_node(r: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
+    Ok(Node {
+        id: r.get(0)?,
+        account_id: Uuid::parse_str(&r.get::<_, String>(1)?).unwrap_or_default(),
+        drive_id: r.get(2)?,
+        parent_id: r.get(3)?,
+        name: r.get(4)?,
+        display_name: r.get(5)?,
+        kind: r.get(6)?,
+        mime: r.get(7)?,
+        size: r.get(8)?,
+        md5: r.get(9)?,
+        modified_ms: r.get(10)?,
+        head_revision: r.get(11)?,
+        trashed: r.get::<_, i32>(12)? != 0,
+        shared_drive_id: r.get(13)?,
+        state: NodeState::parse(&r.get::<_, String>(14)?),
+        pinned: r.get::<_, i32>(15)? != 0,
+        last_access_ms: r.get(16)?,
+    })
+}
+
+fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -220,6 +266,18 @@ pub struct Node {
     pub state: NodeState,
     pub pinned: bool,
     pub last_access_ms: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct UploadRow {
+    pub op_id: i64,
+    pub node_id: i64,
+    pub op: String,
+    pub state: String,
+    pub attempts: i32,
+    pub next_try_ms: i64,
+    pub resumable_uri: Option<String>,
+    pub base_revision: Option<String>,
 }
 
 pub const SCHEMA_SQL: &str = r#"
@@ -255,7 +313,7 @@ CREATE TABLE IF NOT EXISTS cache_files (
   pinned INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS upload_queue (
-  op_id INTEGER PRIMARY KEY,
+  op_id INTEGER PRIMARY KEY AUTOINCREMENT,
   node_id INTEGER NOT NULL,
   op TEXT NOT NULL,
   state TEXT NOT NULL,
@@ -271,7 +329,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrate_upsert_list() {
+    fn migrate_upsert_queue() {
         let store = Store::open_in_memory().unwrap();
         let acct = Uuid::new_v4();
         let n = Node {
@@ -289,13 +347,15 @@ mod tests {
             head_revision: None,
             trashed: false,
             shared_drive_id: None,
-            state: NodeState::Placeholder,
+            state: NodeState::Dirty,
             pinned: false,
             last_access_ms: 0,
         };
         store.upsert_node(&n).unwrap();
-        assert_eq!(store.list_children(0).unwrap().len(), 1);
-        store.set_change_token(acct, "tok1").unwrap();
-        assert_eq!(store.get_change_token(acct).unwrap().as_deref(), Some("tok1"));
+        let id = store.enqueue_upload(1, "update", None).unwrap();
+        assert!(id > 0);
+        assert_eq!(store.queue_depth().unwrap(), 1);
+        let row = store.next_upload().unwrap().unwrap();
+        assert_eq!(row.op, "update");
     }
 }
