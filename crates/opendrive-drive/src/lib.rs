@@ -39,6 +39,24 @@ impl DriveClient {
         req.bearer_auth(&self.access_token)
     }
 
+    async fn check(&self, resp: reqwest::Response) -> Result<reqwest::Response> {
+        let status = resp.status();
+        if status == 401 || status == 403 {
+            return Err(DriveError::Auth);
+        }
+        if status == 429 {
+            return Err(DriveError::RateLimited);
+        }
+        if status == 404 {
+            return Err(DriveError::NotFound);
+        }
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(DriveError::Http(format!("{status}: {body}")));
+        }
+        Ok(resp)
+    }
+
     pub async fn about(&self) -> Result<About> {
         #[derive(Deserialize)]
         struct Resp {
@@ -65,28 +83,13 @@ impl DriveClient {
             .send()
             .await
             .map_err(|e| DriveError::Http(e.to_string()))?;
-
-        if resp.status() == 401 || resp.status() == 403 {
-            return Err(DriveError::Auth);
-        }
-        if !resp.status().is_success() {
-            return Err(DriveError::Http(resp.status().to_string()));
-        }
-
+        let resp = self.check(resp).await?;
         let body: Resp = resp.json().await.map_err(|e| DriveError::Http(e.to_string()))?;
         Ok(About {
             email: body.user.email_address,
             display_name: body.user.display_name.unwrap_or_default(),
-            storage_quota: body
-                .storage_quota
-                .limit
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
-            storage_used: body
-                .storage_quota
-                .usage
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0),
+            storage_quota: body.storage_quota.limit.and_then(|s| s.parse().ok()).unwrap_or(0),
+            storage_used: body.storage_quota.usage.and_then(|s| s.parse().ok()).unwrap_or(0),
         })
     }
 
@@ -101,22 +104,6 @@ impl DriveClient {
             files: Option<Vec<FileJson>>,
             #[serde(rename = "nextPageToken")]
             next_page_token: Option<String>,
-        }
-        #[derive(Deserialize)]
-        struct FileJson {
-            id: String,
-            name: String,
-            #[serde(rename = "mimeType")]
-            mime_type: String,
-            size: Option<String>,
-            #[serde(rename = "md5Checksum")]
-            md5: Option<String>,
-            #[serde(rename = "modifiedTime")]
-            modified_time: Option<String>,
-            parents: Option<Vec<String>>,
-            trashed: Option<bool>,
-            #[serde(rename = "headRevisionId")]
-            head_revision_id: Option<String>,
         }
 
         let q = format!("'{}' in parents and trashed = false", parent);
@@ -141,52 +128,108 @@ impl DriveClient {
         }
 
         let resp = req.send().await.map_err(|e| DriveError::Http(e.to_string()))?;
-        if resp.status() == 429 {
-            return Err(DriveError::RateLimited);
-        }
-        if !resp.status().is_success() {
-            return Err(DriveError::Http(resp.status().to_string()));
-        }
-
+        let resp = self.check(resp).await?;
         let body: Resp = resp.json().await.map_err(|e| DriveError::Http(e.to_string()))?;
-        let files = body
-            .files
-            .unwrap_or_default()
-            .into_iter()
-            .map(|f| DriveFile {
-                id: f.id,
-                name: f.name,
-                mime_type: f.mime_type,
-                size: f.size.and_then(|s| s.parse().ok()),
-                md5: f.md5,
-                modified_time: f.modified_time,
-                parents: f.parents.unwrap_or_default(),
-                trashed: f.trashed.unwrap_or(false),
-                head_revision_id: f.head_revision_id,
-            })
-            .collect();
-
         Ok(FileList {
-            files,
+            files: body.files.unwrap_or_default().into_iter().map(Into::into).collect(),
             next_page_token: body.next_page_token,
         })
     }
 
-    pub async fn changes(&self, _page_token: &str) -> Result<ChangeList> {
-        Err(DriveError::Other("not implemented".into()))
+    pub async fn get_start_page_token(&self) -> Result<String> {
+        #[derive(Deserialize)]
+        struct Resp {
+            #[serde(rename = "startPageToken")]
+            start_page_token: String,
+        }
+        let resp = self
+            .auth(self.http.get(format!("{BASE}/changes/startPageToken")))
+            .query(&[("supportsAllDrives", "true")])
+            .send()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))?;
+        let resp = self.check(resp).await?;
+        let body: Resp = resp.json().await.map_err(|e| DriveError::Http(e.to_string()))?;
+        Ok(body.start_page_token)
     }
 
-    pub async fn get_start_page_token(&self) -> Result<String> {
-        Err(DriveError::Other("not implemented".into()))
+    pub async fn changes(&self, page_token: &str) -> Result<ChangeList> {
+        #[derive(Deserialize)]
+        struct Resp {
+            changes: Option<Vec<ChangeJson>>,
+            #[serde(rename = "newStartPageToken")]
+            new_start_page_token: Option<String>,
+            #[serde(rename = "nextPageToken")]
+            next_page_token: Option<String>,
+        }
+        #[derive(Deserialize)]
+        struct ChangeJson {
+            #[serde(rename = "fileId")]
+            file_id: Option<String>,
+            removed: Option<bool>,
+            file: Option<FileJson>,
+        }
+
+        let resp = self
+            .auth(self.http.get(format!("{BASE}/changes")))
+            .query(&[
+                ("pageToken", page_token),
+                ("supportsAllDrives", "true"),
+                ("includeItemsFromAllDrives", "true"),
+                (
+                    "fields",
+                    "nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed,headRevisionId))",
+                ),
+            ])
+            .send()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))?;
+        let resp = self.check(resp).await?;
+        let body: Resp = resp.json().await.map_err(|e| DriveError::Http(e.to_string()))?;
+
+        let changes = body
+            .changes
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|c| {
+                let file_id = c.file_id.or_else(|| c.file.as_ref().map(|f| f.id.clone()))?;
+                Some(Change {
+                    file_id,
+                    removed: c.removed.unwrap_or(false),
+                    file: c.file.map(Into::into),
+                })
+            })
+            .collect();
+
+        Ok(ChangeList {
+            changes,
+            new_start_token: body.new_start_page_token.or(body.next_page_token),
+        })
     }
 
     pub async fn download_range(
         &self,
-        _file_id: &str,
-        _offset: u64,
-        _len: u32,
+        file_id: &str,
+        offset: u64,
+        len: u32,
     ) -> Result<Bytes> {
-        Err(DriveError::Other("not implemented".into()))
+        let end = offset.saturating_add(len as u64).saturating_sub(1);
+        let resp = self
+            .auth(self.http.get(format!("{BASE}/files/{file_id}")))
+            .query(&[("alt", "media")])
+            .header("Range", format!("bytes={offset}-{end}"))
+            .send()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))?;
+        let status = resp.status().as_u16();
+        if status != 200 && status != 206 {
+            return self.check(resp).await.map(|_| Bytes::new());
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))?;
+        Ok(bytes)
     }
 
     pub async fn create_resumable(&self, _metadata: &serde_json::Value) -> Result<String> {
@@ -203,20 +246,69 @@ impl DriveClient {
         Err(DriveError::Other("not implemented".into()))
     }
 
-    pub async fn trash(&self, _file_id: &str) -> Result<()> {
-        Err(DriveError::Other("not implemented".into()))
+    pub async fn trash(&self, file_id: &str) -> Result<()> {
+        let resp = self
+            .auth(self.http.patch(format!("{BASE}/files/{file_id}")))
+            .json(&serde_json::json!({ "trashed": true }))
+            .send()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))?;
+        self.check(resp).await?;
+        Ok(())
     }
 
     pub async fn update_metadata(
         &self,
-        _file_id: &str,
-        _patch: &serde_json::Value,
+        file_id: &str,
+        patch: &serde_json::Value,
     ) -> Result<DriveFile> {
-        Err(DriveError::Other("not implemented".into()))
+        let resp = self
+            .auth(self.http.patch(format!("{BASE}/files/{file_id}")))
+            .query(&[("supportsAllDrives", "true")])
+            .json(patch)
+            .send()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))?;
+        let resp = self.check(resp).await?;
+        let f: FileJson = resp.json().await.map_err(|e| DriveError::Http(e.to_string()))?;
+        Ok(f.into())
     }
 
     pub fn native_doc_link(file_id: &str) -> String {
         format!("https://drive.google.com/open?id={file_id}")
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FileJson {
+    id: String,
+    name: String,
+    #[serde(rename = "mimeType")]
+    mime_type: String,
+    size: Option<String>,
+    #[serde(rename = "md5Checksum")]
+    md5: Option<String>,
+    #[serde(rename = "modifiedTime")]
+    modified_time: Option<String>,
+    parents: Option<Vec<String>>,
+    trashed: Option<bool>,
+    #[serde(rename = "headRevisionId")]
+    head_revision_id: Option<String>,
+}
+
+impl From<FileJson> for DriveFile {
+    fn from(f: FileJson) -> Self {
+        Self {
+            id: f.id,
+            name: f.name,
+            mime_type: f.mime_type,
+            size: f.size.and_then(|s| s.parse().ok()),
+            md5: f.md5,
+            modified_time: f.modified_time,
+            parents: f.parents.unwrap_or_default(),
+            trashed: f.trashed.unwrap_or(false),
+            head_revision_id: f.head_revision_id,
+        }
     }
 }
 
