@@ -16,9 +16,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub struct SyncEngine {
-    store: Arc<Mutex<Store>>,
-    /// account_id -> DriveClient (access token)
-    clients: Mutex<HashMap<Uuid, DriveClient>>,
+    pub(crate) store: Arc<Mutex<Store>>,
+    pub(crate) clients: Mutex<HashMap<Uuid, DriveClient>>,
     events: Mutex<Option<mpsc::Sender<EngineEvent>>>,
 }
 
@@ -60,7 +59,6 @@ impl SyncEngine {
         Ok(1)
     }
 
-    /// Pull one folder page from Drive into the store.
     pub async fn hydrate_folder(&self, account_id: Uuid, parent_node: NodeId) -> Result<()> {
         let (drive_parent, next_id_base) = {
             let store = self.store.lock();
@@ -71,7 +69,7 @@ impl SyncEngine {
             (n.drive_id.clone(), parent_node as i64 * 1000 + 10)
         };
 
-        let client = {
+        let token = {
             let clients = self.clients.lock();
             clients
                 .get(&account_id)
@@ -79,7 +77,7 @@ impl SyncEngine {
                 .access_token
                 .clone()
         };
-        let client = DriveClient::new(client);
+        let client = DriveClient::new(token);
 
         let list = client
             .list_files(&drive_parent, None, true)
@@ -117,6 +115,13 @@ impl SyncEngine {
             store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
         }
         Ok(())
+    }
+
+    pub fn enqueue_upload(&self, node_id: i64, op: &str, base_revision: Option<&str>) -> Result<i64> {
+        self.store
+            .lock()
+            .enqueue_upload(node_id, op, base_revision)
+            .map_err(|e| SyncError::Other(e.to_string()))
     }
 }
 
@@ -231,6 +236,7 @@ impl VfsEngine for SyncEngine {
             last_access_ms: 0,
         };
         store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
+        let _ = store.enqueue_upload(id, "create", None);
         Ok(to_attr(&n))
     }
 
@@ -246,6 +252,7 @@ impl VfsEngine for SyncEngine {
         {
             n.trashed = true;
             store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
+            let _ = store.enqueue_upload(node as i64, "trash", None);
         }
         Ok(())
     }
@@ -278,9 +285,10 @@ impl VfsEngine for SyncEngine {
     }
 
     async fn stats(&self) -> EngineStats {
+        let depth = self.store.lock().queue_depth().unwrap_or(0);
         EngineStats {
             transfers: 0,
-            queue_depth: 0,
+            queue_depth: depth,
             errors: 0,
         }
     }
