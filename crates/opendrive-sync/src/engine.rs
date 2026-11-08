@@ -1,5 +1,6 @@
 //! Store-backed VfsEngine (M0/M1).
 
+use crate::staging::StagingDir;
 use crate::{
     DirPage, EngineEvent, EngineStats, Kind, NodeAttr, NodeId, PageToken, Result, SyncError,
     VfsEngine, WriteHandle,
@@ -11,6 +12,7 @@ use opendrive_store::{Node, NodeState, Store};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::ffi::OsStr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -18,6 +20,7 @@ use uuid::Uuid;
 pub struct SyncEngine {
     pub(crate) store: Arc<Mutex<Store>>,
     pub(crate) clients: Mutex<HashMap<Uuid, DriveClient>>,
+    staging: Mutex<Option<StagingDir>>,
     events: Mutex<Option<mpsc::Sender<EngineEvent>>>,
 }
 
@@ -26,8 +29,15 @@ impl SyncEngine {
         Self {
             store: Arc::new(Mutex::new(store)),
             clients: Mutex::new(HashMap::new()),
+            staging: Mutex::new(None),
             events: Mutex::new(None),
         }
+    }
+
+    pub fn with_staging_dir(self, path: impl Into<PathBuf>) -> Result<Self> {
+        let dir = StagingDir::new(path).map_err(|e| SyncError::Io(e.to_string()))?;
+        *self.staging.lock() = Some(dir);
+        Ok(self)
     }
 
     pub fn set_drive_client(&self, account_id: Uuid, client: DriveClient) {
@@ -175,6 +185,19 @@ impl VfsEngine for SyncEngine {
     }
 
     async fn read(&self, node: NodeId, offset: u64, len: u32) -> Result<Bytes> {
+        // Prefer local staging if present
+        if let Some(ref staging) = *self.staging.lock() {
+            if let Ok(data) = staging.read_all(node as i64) {
+                if !data.is_empty() {
+                    let start = offset as usize;
+                    let end = (offset as usize + len as usize).min(data.len());
+                    if start < data.len() {
+                        return Ok(Bytes::copy_from_slice(&data[start..end]));
+                    }
+                }
+            }
+        }
+
         let (account_id, drive_id) = {
             let store = self.store.lock();
             let n = store
@@ -199,6 +222,11 @@ impl VfsEngine for SyncEngine {
     }
 
     async fn open_write(&self, node: NodeId) -> Result<WriteHandle> {
+        if let Some(ref staging) = *self.staging.lock() {
+            let _ = staging
+                .open_write(node as i64)
+                .map_err(|e| SyncError::Io(e.to_string()))?;
+        }
         Ok(WriteHandle { node })
     }
 
@@ -253,6 +281,9 @@ impl VfsEngine for SyncEngine {
             n.trashed = true;
             store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
             let _ = store.enqueue_upload(node as i64, "trash", None);
+        }
+        if let Some(ref staging) = *self.staging.lock() {
+            let _ = staging.remove(node as i64);
         }
         Ok(())
     }
