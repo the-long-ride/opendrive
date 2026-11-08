@@ -7,12 +7,12 @@
 - [x] Upload queue worker + local staging
 - [x] Linux FUSE read path (lookup/getattr/readdir/read)
 - [x] CLI: `authorize`, `list-root`, `--self-check`
+- [x] Provisional answers Q1–Q5 — see [open-questions.md](open-questions.md)
 - [ ] Windows Cloud Files placeholder + hydration (stub only)
 - [ ] macOS NFS read-only mount (stub only)
 - [ ] GPUI window + tray
-- [ ] Answer open questions Q1–Q5
 
-Exit: go/no-go on GPUI, cloud-filter, NFS approach.
+Exit: go/no-go on GPUI, cloud-filter, NFS approach — **provisional Go** (see open-questions.md).
 
 ## Manual test
 
