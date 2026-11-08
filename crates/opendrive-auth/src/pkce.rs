@@ -1,11 +1,14 @@
 //! PKCE (S256) helpers.
 
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use rand::RngCore;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PkceError {
-    #[error("rng: {0}")]
-    Rng(String),
+    #[error("rng failed")]
+    Rng,
 }
 
 #[derive(Debug, Clone)]
@@ -14,16 +17,33 @@ pub struct PkcePair {
     pub challenge: String,
 }
 
-/// Generate a high-entropy verifier and its S256 challenge.
-/// Real impl: 32+ random bytes, base64url, SHA-256.
+/// 32 random bytes → base64url verifier; challenge = BASE64URL(SHA256(verifier)).
 pub fn generate_pkce() -> Result<PkcePair, PkceError> {
-    // Placeholder values for compile/type shape; replace with real crypto.
+    let mut buf = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut buf);
+    let verifier = URL_SAFE_NO_PAD.encode(buf);
+    let digest = Sha256::digest(verifier.as_bytes());
+    let challenge = URL_SAFE_NO_PAD.encode(digest);
     Ok(PkcePair {
-        verifier: "pending-real-rng".into(),
-        challenge: "pending-real-sha256".into(),
+        verifier,
+        challenge,
     })
 }
 
 pub fn random_state() -> String {
-    "pending-real-state".into()
+    let mut buf = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut buf);
+    URL_SAFE_NO_PAD.encode(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pkce_shape() {
+        let p = generate_pkce().unwrap();
+        assert!(p.verifier.len() >= 43);
+        assert_eq!(p.challenge.len(), 43); // SHA256 = 32 bytes → 43 base64url
+    }
 }

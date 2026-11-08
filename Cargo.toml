@@ -34,3 +34,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 bytes = "1"
 parking_lot = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+url = "2"
