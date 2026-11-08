@@ -5,6 +5,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 const BASE: &str = "https://www.googleapis.com/drive/v3";
+const UPLOAD_BASE: &str = "https://www.googleapis.com/upload/drive/v3";
 
 #[derive(Debug, Error)]
 pub enum DriveError {
@@ -50,7 +51,7 @@ impl DriveClient {
         if status == 404 {
             return Err(DriveError::NotFound);
         }
-        if !status.is_success() {
+        if !status.is_success() && status.as_u16() != 308 {
             let body = resp.text().await.unwrap_or_default();
             return Err(DriveError::Http(format!("{status}: {body}")));
         }
@@ -225,25 +226,69 @@ impl DriveClient {
         if status != 200 && status != 206 {
             return self.check(resp).await.map(|_| Bytes::new());
         }
-        let bytes = resp
-            .bytes()
+        resp.bytes()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))
+    }
+
+    /// Start resumable upload; returns session URI.
+    pub async fn create_resumable(&self, metadata: &serde_json::Value) -> Result<String> {
+        let resp = self
+            .auth(
+                self.http
+                    .post(format!("{UPLOAD_BASE}/files"))
+                    .query(&[("uploadType", "resumable"), ("supportsAllDrives", "true")]),
+            )
+            .header("Content-Type", "application/json; charset=UTF-8")
+            .json(metadata)
+            .send()
             .await
             .map_err(|e| DriveError::Http(e.to_string()))?;
-        Ok(bytes)
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(DriveError::Http(format!("{status}: {body}")));
+        }
+        resp.headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .ok_or_else(|| DriveError::Other("missing Location header".into()))
     }
 
-    pub async fn create_resumable(&self, _metadata: &serde_json::Value) -> Result<String> {
-        Err(DriveError::Other("not implemented".into()))
-    }
-
+    /// Upload a chunk. Returns Some(file) when complete (200/201), None if 308 Resume Incomplete.
     pub async fn upload_chunk(
         &self,
-        _session_uri: &str,
-        _offset: u64,
-        _total: u64,
-        _data: &[u8],
+        session_uri: &str,
+        offset: u64,
+        total: u64,
+        data: &[u8],
     ) -> Result<Option<DriveFile>> {
-        Err(DriveError::Other("not implemented".into()))
+        let end = offset + data.len() as u64 - 1;
+        let resp = self
+            .http
+            .put(session_uri)
+            .header("Content-Length", data.len().to_string())
+            .header(
+                "Content-Range",
+                format!("bytes {offset}-{end}/{total}"),
+            )
+            .body(data.to_vec())
+            .send()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))?;
+
+        let status = resp.status().as_u16();
+        if status == 308 {
+            return Ok(None);
+        }
+        if status == 200 || status == 201 {
+            let f: FileJson = resp.json().await.map_err(|e| DriveError::Http(e.to_string()))?;
+            return Ok(Some(f.into()));
+        }
+        let body = resp.text().await.unwrap_or_default();
+        Err(DriveError::Http(format!("{status}: {body}")))
     }
 
     pub async fn trash(&self, file_id: &str) -> Result<()> {
