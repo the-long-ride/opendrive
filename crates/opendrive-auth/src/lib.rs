@@ -6,6 +6,7 @@ mod pkce;
 pub use loopback::{bind_loopback, wait_for_redirect, LoopbackError, RedirectParams};
 pub use pkce::{generate_pkce, random_state, PkceError, PkcePair};
 
+use serde::Deserialize;
 use thiserror::Error;
 use url::Url;
 use uuid::Uuid;
@@ -32,6 +33,14 @@ pub enum AuthError {
 }
 
 pub type Result<T> = std::result::Result<T, AuthError>;
+
+#[derive(Debug, Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: Option<u64>,
+    error: Option<String>,
+}
 
 pub struct AuthClient {
     pub client_id: String,
@@ -72,15 +81,13 @@ impl AuthClient {
         u.to_string()
     }
 
-    /// Full browser flow: bind loopback → open URL (caller) → wait → exchange.
-    /// Returns (email placeholder, refresh_token). Email filled after about() later.
+    /// Returns (access_token, refresh_token). Email comes from Drive about() later.
     pub async fn authorize(&self, read_only: bool) -> Result<(String, String)> {
         let pkce = generate_pkce()?;
         let state = random_state();
         let (listener, redirect_uri, _) = bind_loopback().await?;
-        let _auth_url = self.authorization_url(&redirect_uri, &pkce.challenge, &state, read_only);
-        // Caller / UI should open _auth_url in system browser.
-        // For headless tests this will timeout unless a client hits the redirect.
+        let auth_url = self.authorization_url(&redirect_uri, &pkce.challenge, &state, read_only);
+        tracing::info!(%auth_url, "open this URL in a browser to sign in");
         let redirect = wait_for_redirect(listener, &state, 180).await?;
         self.exchange_code(&redirect.code, &pkce.verifier, &redirect_uri)
             .await
@@ -92,15 +99,65 @@ impl AuthClient {
         verifier: &str,
         redirect_uri: &str,
     ) -> Result<(String, String)> {
-        // TODO: HTTP POST TOKEN_URL with reqwest when wired
-        let _ = (code, verifier, redirect_uri, TOKEN_URL);
-        Err(AuthError::OAuth(
-            "token exchange not implemented (need HTTP client)".into(),
-        ))
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(TOKEN_URL)
+            .form(&[
+                ("code", code),
+                ("client_id", self.client_id.as_str()),
+                ("client_secret", self.client_secret.as_str()),
+                ("redirect_uri", redirect_uri),
+                ("grant_type", "authorization_code"),
+                ("code_verifier", verifier),
+            ])
+            .send()
+            .await
+            .map_err(|e| AuthError::OAuth(e.to_string()))?;
+
+        let body: TokenResponse = resp
+            .json()
+            .await
+            .map_err(|e| AuthError::OAuth(e.to_string()))?;
+
+        if body.error.as_deref() == Some("invalid_grant") {
+            return Err(AuthError::InvalidGrant);
+        }
+        if let Some(err) = body.error {
+            return Err(AuthError::OAuth(err));
+        }
+        let refresh = body
+            .refresh_token
+            .ok_or_else(|| AuthError::OAuth("no refresh_token (check prompt=consent)".into()))?;
+        let _ = body.expires_in;
+        Ok((body.access_token, refresh))
     }
 
-    pub async fn refresh(&self, _refresh_token: &str) -> Result<String> {
-        Err(AuthError::OAuth("not implemented".into()))
+    pub async fn refresh(&self, refresh_token: &str) -> Result<String> {
+        let client = reqwest::Client::new();
+        let resp = client
+            .post(TOKEN_URL)
+            .form(&[
+                ("client_id", self.client_id.as_str()),
+                ("client_secret", self.client_secret.as_str()),
+                ("refresh_token", refresh_token),
+                ("grant_type", "refresh_token"),
+            ])
+            .send()
+            .await
+            .map_err(|e| AuthError::OAuth(e.to_string()))?;
+
+        let body: TokenResponse = resp
+            .json()
+            .await
+            .map_err(|e| AuthError::OAuth(e.to_string()))?;
+
+        if body.error.as_deref() == Some("invalid_grant") {
+            return Err(AuthError::InvalidGrant);
+        }
+        if let Some(err) = body.error {
+            return Err(AuthError::OAuth(err));
+        }
+        Ok(body.access_token)
     }
 }
 
