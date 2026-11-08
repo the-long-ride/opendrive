@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 opendrive-core = { path = "../opendrive-core" }
 opendrive-sync = { path = "../opendrive-sync" }
+opendrive-store = { path = "../opendrive-store" }
 opendrive-platform = { path = "../opendrive-platform" }
 tokio = { workspace = true }
 tracing = { workspace = true }
