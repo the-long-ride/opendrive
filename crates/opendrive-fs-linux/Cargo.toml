@@ -8,3 +8,8 @@ license.workspace = true
 opendrive-sync = { path = "../opendrive-sync" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+fuser = "0.14"
+libc = "0.2"
