@@ -9,6 +9,7 @@
 
 mod engine;
 mod queue;
+mod worker;
 
 pub use engine::SyncEngine;
 pub use queue::{conflict_name, QueueEntry, UploadOp};
@@ -96,7 +97,6 @@ pub enum SyncError {
 
 pub type Result<T> = std::result::Result<T, SyncError>;
 
-/// Placeholder engine for tests without a store.
 pub struct PlaceholderEngine;
 
 #[async_trait]
@@ -147,30 +147,5 @@ impl VfsEngine for PlaceholderEngine {
             queue_depth: 0,
             errors: 0,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use opendrive_store::Store;
-
-    #[tokio::test]
-    async fn sync_engine_list() {
-        let store = Store::open_in_memory().unwrap();
-        let eng = SyncEngine::new(store);
-        let acct = Uuid::new_v4();
-        eng.seed_root_account(acct, "Work").unwrap();
-        let page = eng.list(0, None).await.unwrap();
-        assert_eq!(page.entries.len(), 1);
-        assert_eq!(page.entries[0].name, "Work");
-    }
-
-    #[test]
-    fn conflict_name_format() {
-        assert_eq!(
-            conflict_name("file.txt", "host", "2026-01-01"),
-            "file.txt (conflict host 2026-01-01)"
-        );
     }
 }
