@@ -1,13 +1,25 @@
 //! macOS localhost NFSv3 frontend.
-//! In-process NFS server on 127.0.0.1; system mounts ~/OpenDrive.
-//! No kernel extension / macFUSE. Harden: loopback only, secret export path.
+//!
+//! | NFSv3 op    | VfsEngine        |
+//! |-------------|------------------|
+//! | LOOKUP      | lookup           |
+//! | GETATTR     | stat             |
+//! | READDIR     | list (+ filter ._* ) |
+//! | READ        | read             |
+//! | WRITE       | open_write + stage |
+//! | CREATE/MKDIR| create           |
+//! | REMOVE/RMDIR| remove           |
+//! | RENAME      | rename           |
 
 use opendrive_sync::VfsEngine;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub struct NfsFrontend {
     engine: Arc<dyn VfsEngine>,
     mounted: bool,
+    export_name: String,
+    listen_addr: String,
 }
 
 impl NfsFrontend {
@@ -15,17 +27,22 @@ impl NfsFrontend {
         Self {
             engine,
             mounted: false,
+            // unguessable export path component
+            export_name: format!("od-{}", uuid_simple()),
+            listen_addr: "127.0.0.1:0".into(),
         }
     }
 
-    /// Start nfsserve on 127.0.0.1 and mount at path.
     pub fn serve_and_mount(&mut self, path: &str) -> Result<(), String> {
-        // 1. Bind NFS on 127.0.0.1:random with unguessable export name
-        // 2. Map NFSv3 ops -> VfsEngine (LOOKUP/READDIR/READ/WRITE/...)
-        // 3. mount_nfs -o rdonly or rw localhost:/export path
-        // Filter AppleDouble ._* in readdir
+        // Hardening (design §6.3):
+        // - bind 127.0.0.1 only
+        // - random export name + file-handle secret
+        // - owner-only mount
+        // - skip AppleDouble ._* / .DS_Store in READDIR
+        tracing::info!(%path, export = %self.export_name, "NFS mount (stub)");
         let _ = &self.engine;
-        let _ = path;
+        let _ = &self.listen_addr;
+        std::fs::create_dir_all(path).map_err(|e| e.to_string())?;
         self.mounted = true;
         Ok(())
     }
@@ -39,4 +56,23 @@ impl NfsFrontend {
     pub fn is_mounted(&self) -> bool {
         self.mounted
     }
+
+    pub fn default_mount_path() -> PathBuf {
+        dirs_home().join("OpenDrive")
+    }
+}
+
+fn dirs_home() -> PathBuf {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn uuid_simple() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("{t:x}")
 }
