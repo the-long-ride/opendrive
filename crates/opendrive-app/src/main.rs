@@ -1,5 +1,7 @@
 //! OpenDrive desktop app entrypoint.
 
+mod ui;
+
 use opendrive_auth::{store_refresh_token, AuthClient};
 use opendrive_core::{AppCommand, AppController, AppEvent, Settings};
 use opendrive_drive::DriveClient;
@@ -33,12 +35,14 @@ async fn main() -> anyhow::Result<()> {
             list_root_cmd(&token).await
         }
         "status" => status_cmd(),
+        "ui" => ui::run_ui(AppController::new(Settings::default())),
         "" | "help" | "--help" => {
             println!("opendrive commands:");
             println!("  --self-check");
             println!("  authorize <client_id> <client_secret>");
             println!("  list-root <access_token>");
             println!("  status");
+            println!("  ui          (GPUI placeholder)");
             Ok(())
         }
         other => {
