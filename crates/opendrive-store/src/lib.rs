@@ -1,5 +1,7 @@
 //! SQLite metadata + content cache index + upload queue.
 
+mod cache;
+
 use rusqlite::{params, Connection, OptionalExtension};
 use thiserror::Error;
 use uuid::Uuid;
