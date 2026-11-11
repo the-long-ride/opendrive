@@ -8,3 +8,8 @@ license.workspace = true
 opendrive-sync = { path = "../opendrive-sync" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+tokio = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+# cloud-filter = "0.0.6"  # enable when building on Windows for M2
+# windows = { version = "0.58", features = ["Win32_Storage_CloudFilters"] }
