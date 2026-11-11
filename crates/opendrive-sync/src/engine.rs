@@ -20,8 +20,8 @@ use uuid::Uuid;
 pub struct SyncEngine {
     pub(crate) store: Arc<Mutex<Store>>,
     pub(crate) clients: Mutex<HashMap<Uuid, DriveClient>>,
+    pub(crate) events: Mutex<Option<mpsc::Sender<EngineEvent>>>,
     staging: Mutex<Option<StagingDir>>,
-    events: Mutex<Option<mpsc::Sender<EngineEvent>>>,
 }
 
 impl SyncEngine {
@@ -29,8 +29,8 @@ impl SyncEngine {
         Self {
             store: Arc::new(Mutex::new(store)),
             clients: Mutex::new(HashMap::new()),
-            staging: Mutex::new(None),
             events: Mutex::new(None),
+            staging: Mutex::new(None),
         }
     }
 
@@ -185,7 +185,6 @@ impl VfsEngine for SyncEngine {
     }
 
     async fn read(&self, node: NodeId, offset: u64, len: u32) -> Result<Bytes> {
-        // Prefer local staging if present
         if let Some(ref staging) = *self.staging.lock() {
             if let Ok(data) = staging.read_all(node as i64) {
                 if !data.is_empty() {
