@@ -270,7 +270,19 @@ impl VfsEngine for SyncEngine {
         Ok(to_attr(&n))
     }
 
-    async fn rename(&self, _node: NodeId, _new_parent: NodeId, _new_name: &OsStr) -> Result<()> {
+    async fn rename(&self, node: NodeId, new_parent: NodeId, new_name: &OsStr) -> Result<()> {
+        let new_name = new_name.to_string_lossy().to_string();
+        let store = self.store.lock();
+        let mut n = store
+            .get_node(node as i64)
+            .map_err(|e| SyncError::Other(e.to_string()))?
+            .ok_or(SyncError::NotFound)?;
+        n.parent_id = Some(new_parent as i64);
+        n.name = new_name.clone();
+        n.display_name = new_name;
+        n.state = NodeState::Dirty;
+        store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
+        let _ = store.enqueue_upload(node as i64, "rename", n.head_revision.as_deref());
         Ok(())
     }
 
