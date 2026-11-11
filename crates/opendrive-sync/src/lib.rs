@@ -8,6 +8,7 @@
 //! 5. Quit waits for or reports pending uploads.
 
 mod engine;
+mod poller;
 mod queue;
 mod staging;
 mod worker;
