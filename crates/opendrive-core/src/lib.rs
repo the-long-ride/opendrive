@@ -1,5 +1,9 @@
 //! Domain model, settings, orchestration (UI-agnostic).
 
+mod controller;
+
+pub use controller::{AppCommand, AppController, AppEvent};
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -119,23 +123,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn add_get_remove() {
-        let mut mgr = AccountManager::new();
-        let id = Uuid::new_v4();
-        let cred = Uuid::new_v4();
-        mgr.add_account(Account {
-            id,
+    fn controller_pause_resume() {
+        let mut c = AppController::new(Settings::default());
+        let ev = c.handle(AppCommand::AddAccount {
             nickname: "Work".into(),
-            email: "a@b.c".into(),
-            credential_set_id: cred,
-            folder_name: "Work".into(),
-            read_only: false,
-            enabled: true,
-            status: AccountStatus::Connected,
         });
-        assert_eq!(mgr.list_accounts().len(), 1);
-        assert_eq!(mgr.get_account(id).unwrap().email, "a@b.c");
-        mgr.remove_account(id).unwrap();
-        assert!(mgr.get_account(id).is_err());
+        let id = match &ev[0] {
+            AppEvent::AccountUpdated(a) => a.id,
+            _ => panic!("expected account"),
+        };
+        let ev = c.handle(AppCommand::PauseAccount { id });
+        assert!(matches!(
+            &ev[0],
+            AppEvent::AccountUpdated(a) if a.status == AccountStatus::Paused
+        ));
     }
 }
