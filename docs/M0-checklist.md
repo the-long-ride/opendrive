@@ -4,15 +4,16 @@
 - [x] Drive `about` / `files.list` / `changes` / range download / resumable upload
 - [x] SQLite store (nodes, change tokens, upload queue)
 - [x] SyncEngine list/lookup/stat/read/create/remove + hydrate_folder
-- [x] Upload queue worker + local staging
+- [x] Upload queue worker + local staging + change poller
 - [x] Linux FUSE read path (lookup/getattr/readdir/read)
 - [x] CLI: `authorize`, `list-root`, `--self-check`
+- [x] AppController (UI-agnostic commands/events)
 - [x] Provisional answers Q1–Q5 — see [open-questions.md](open-questions.md)
 - [ ] Windows Cloud Files placeholder + hydration (stub only)
 - [ ] macOS NFS read-only mount (stub only)
 - [ ] GPUI window + tray
 
-Exit: go/no-go on GPUI, cloud-filter, NFS approach — **provisional Go** (see open-questions.md).
+Exit: go/no-go on GPUI, cloud-filter, NFS approach — **provisional Go**.
 
 ## Manual test
 
