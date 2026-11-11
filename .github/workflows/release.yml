@@ -1,0 +1,52 @@
+name: Release
+on:
+  push:
+    tags: ["v*.*.*"]
+permissions:
+  contents: read
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+      - name: Check Cargo.toml version matches tag
+        run: |
+          V=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
+          test "$V" = "${{ steps.ver.outputs.version }}" || (echo "version mismatch $V vs tag" && exit 1)
+
+  build:
+    needs: gate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build -p opendrive-app --release --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: opendrive-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/opendrive
+            target/${{ matrix.target }}/release/opendrive.exe
+
+  # publish job: enable when ready (needs contents: write + SHA256SUMS)
+  # publish:
+  #   needs: build
+  #   runs-on: ubuntu-latest
+  #   permissions: { contents: write }
+  #   steps: [download artifacts, checksums, gh release create]
