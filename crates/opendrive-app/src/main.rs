@@ -1,12 +1,11 @@
 //! OpenDrive desktop app entrypoint.
 
 use opendrive_auth::{store_refresh_token, AuthClient};
-use opendrive_core::{Account, AccountManager, AccountStatus};
+use opendrive_core::{AppCommand, AppController, AppEvent, Settings};
 use opendrive_drive::DriveClient;
 use opendrive_store::Store;
 use opendrive_sync::{SyncEngine, VfsEngine};
 use std::env;
-use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
 
@@ -19,19 +18,27 @@ async fn main() -> anyhow::Result<()> {
     match cmd.as_str() {
         "--self-check" => self_check().await,
         "authorize" => {
-            let client_id = args.next().ok_or_else(|| anyhow::anyhow!("usage: authorize <client_id> <client_secret>"))?;
-            let client_secret = args.next().ok_or_else(|| anyhow::anyhow!("usage: authorize <client_id> <client_secret>"))?;
+            let client_id = args
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("usage: authorize <client_id> <client_secret>"))?;
+            let client_secret = args
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("usage: authorize <client_id> <client_secret>"))?;
             authorize_cmd(&client_id, &client_secret).await
         }
         "list-root" => {
-            let token = args.next().ok_or_else(|| anyhow::anyhow!("usage: list-root <access_token>"))?;
+            let token = args
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("usage: list-root <access_token>"))?;
             list_root_cmd(&token).await
         }
+        "status" => status_cmd(),
         "" | "help" | "--help" => {
             println!("opendrive commands:");
             println!("  --self-check");
             println!("  authorize <client_id> <client_secret>");
             println!("  list-root <access_token>");
+            println!("  status");
             Ok(())
         }
         other => {
@@ -39,6 +46,18 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+fn status_cmd() -> anyhow::Result<()> {
+    let mut ctrl = AppController::new(Settings::default());
+    let _ = ctrl.handle(AppCommand::AddAccount {
+        nickname: "demo".into(),
+    });
+    println!("accounts: {}", ctrl.accounts.list_accounts().len());
+    for a in ctrl.accounts.list_accounts() {
+        println!("  {}  {:?}  {}", a.nickname, a.status, a.email);
+    }
+    Ok(())
 }
 
 async fn authorize_cmd(client_id: &str, client_secret: &str) -> anyhow::Result<()> {
@@ -81,23 +100,17 @@ async fn self_check() -> anyhow::Result<()> {
     let page = engine.list(0, None).await.map_err(|e| anyhow::anyhow!(e))?;
     assert_eq!(page.entries.len(), 1);
 
-    let mut mgr = AccountManager::new();
-    mgr.add_account(Account {
-        id: acct,
+    let mut ctrl = AppController::new(Settings::default());
+    let ev = ctrl.handle(AppCommand::AddAccount {
         nickname: "Work".into(),
-        email: "check@local".into(),
-        credential_set_id: Uuid::new_v4(),
-        folder_name: "Work".into(),
-        read_only: true,
-        enabled: true,
-        status: AccountStatus::Connected,
     });
+    assert!(matches!(ev[0], AppEvent::AccountUpdated(_)));
 
     let stats = engine.stats().await;
     println!(
         "self-check ok: entries={} accounts={} queue={}",
         page.entries.len(),
-        mgr.list_accounts().len(),
+        ctrl.accounts.list_accounts().len(),
         stats.queue_depth
     );
     Ok(())
