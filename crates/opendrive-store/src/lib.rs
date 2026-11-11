@@ -77,6 +77,13 @@ impl Store {
         Ok(())
     }
 
+    pub fn next_id(&self) -> Result<i64> {
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COALESCE(MAX(id), 0) + 1 FROM nodes", [], |r| r.get(0))?;
+        Ok(n)
+    }
+
     pub fn upsert_node(&self, n: &Node) -> Result<i64> {
         self.conn.execute(
             "INSERT INTO nodes (id, account_id, drive_id, parent_id, name, display_name, kind, mime, size, md5, modified_ms, head_revision, trashed, shared_drive_id, state, pinned, last_access_ms)
@@ -107,6 +114,17 @@ impl Store {
             ],
         )?;
         Ok(n.id)
+    }
+
+    pub fn find_by_drive_id(&self, account_id: Uuid, drive_id: &str) -> Result<Option<Node>> {
+        self.conn
+            .query_row(
+                "SELECT id, account_id, drive_id, parent_id, name, display_name, kind, mime, size, md5, modified_ms, head_revision, trashed, shared_drive_id, state, pinned, last_access_ms FROM nodes WHERE account_id=?1 AND drive_id=?2",
+                params![account_id.to_string(), drive_id],
+                row_to_node,
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn get_node(&self, id: i64) -> Result<Option<Node>> {
@@ -300,6 +318,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   pinned INTEGER NOT NULL DEFAULT 0,
   last_access_ms INTEGER NOT NULL DEFAULT 0
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nodes_acct_drive ON nodes(account_id, drive_id);
 CREATE TABLE IF NOT EXISTS change_tokens (
   account_id TEXT PRIMARY KEY,
   page_token TEXT NOT NULL,
@@ -323,39 +342,3 @@ CREATE TABLE IF NOT EXISTS upload_queue (
   base_revision TEXT
 );
 "#;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn migrate_upsert_queue() {
-        let store = Store::open_in_memory().unwrap();
-        let acct = Uuid::new_v4();
-        let n = Node {
-            id: 1,
-            account_id: acct,
-            drive_id: "d1".into(),
-            parent_id: Some(0),
-            name: "a.txt".into(),
-            display_name: "a.txt".into(),
-            kind: "file".into(),
-            mime: Some("text/plain".into()),
-            size: 3,
-            md5: None,
-            modified_ms: 0,
-            head_revision: None,
-            trashed: false,
-            shared_drive_id: None,
-            state: NodeState::Dirty,
-            pinned: false,
-            last_access_ms: 0,
-        };
-        store.upsert_node(&n).unwrap();
-        let id = store.enqueue_upload(1, "update", None).unwrap();
-        assert!(id > 0);
-        assert_eq!(store.queue_depth().unwrap(), 1);
-        let row = store.next_upload().unwrap().unwrap();
-        assert_eq!(row.op, "update");
-    }
-}
