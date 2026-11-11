@@ -1,3 +1,6 @@
+[graph]
+all-features = false
+
 [licenses]
 allow = [
     "MIT",
@@ -7,12 +10,20 @@ allow = [
     "ISC",
     "Zlib",
     "Unicode-3.0",
+    "Unicode-DFS-2016",
     "CC0-1.0",
+    "OpenSSL",
+    "MPL-2.0",
 ]
-confidence-threshold = 0.9
+confidence-threshold = 0.8
 
 [bans]
 multiple-versions = "warn"
+wildcards = "deny"
 
 [advisories]
 yanked = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "warn"

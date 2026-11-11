@@ -1,7 +1,18 @@
 # Security Policy
 
-## Reporting a Vulnerability
+## Reporting
 
-Please report security issues privately via GitHub Security Advisories or email the maintainers.
+Report vulnerabilities privately via GitHub Security Advisories.
+Do not open public issues for security bugs.
 
-Do not open public issues for vulnerabilities.
+## Scope
+
+- Token/keychain handling (`opendrive-auth`)
+- Path traversal in mounts / staging
+- OAuth loopback binding (must stay on 127.0.0.1)
+- Dependency advisories (`cargo deny` / CI)
+
+## Non-goals (v1)
+
+- Hardening against a compromised local user
+- Formal audit
