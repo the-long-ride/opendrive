@@ -152,3 +152,107 @@ impl VfsEngine for PlaceholderEngine {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opendrive_store::{Node, NodeState, Store};
+
+    #[tokio::test]
+    async fn sync_engine_list() {
+        let store = Store::open_in_memory().unwrap();
+        let eng = SyncEngine::new(store);
+        let acct = Uuid::new_v4();
+        eng.seed_root_account(acct, "Work").unwrap();
+        let page = eng.list(0, None).await.unwrap();
+        assert_eq!(page.entries.len(), 1);
+        assert_eq!(page.entries[0].name, "Work");
+    }
+
+    #[tokio::test]
+    async fn create_enqueues_upload() {
+        let store = Store::open_in_memory().unwrap();
+        let eng = SyncEngine::new(store);
+        let acct = Uuid::new_v4();
+        let root = eng.seed_root_account(acct, "Work").unwrap();
+        let attr = eng
+            .create(root, OsStr::new("note.txt"), Kind::File)
+            .await
+            .unwrap();
+        assert_eq!(attr.name, "note.txt");
+        let stats = eng.stats().await;
+        assert!(stats.queue_depth >= 1);
+    }
+
+    #[test]
+    fn conflict_name_format() {
+        assert_eq!(
+            conflict_name("file.txt", "host", "2026-01-01"),
+            "file.txt (conflict host 2026-01-01)"
+        );
+    }
+
+    #[test]
+    fn fake_drive_into_store() {
+        use opendrive_fake_drive::{FakeDrive, FakeFile};
+        let drive = FakeDrive::new();
+        drive.add_file(FakeFile {
+            id: "f1".into(),
+            name: "hello.txt".into(),
+            mime_type: "text/plain".into(),
+            size: 5,
+            parents: vec!["root".into()],
+            trashed: false,
+            content: b"hello".to_vec(),
+        });
+        let store = Store::open_in_memory().unwrap();
+        let acct = Uuid::new_v4();
+        let root_id = store.next_id().unwrap();
+        store
+            .upsert_node(&Node {
+                id: root_id,
+                account_id: acct,
+                drive_id: "root".into(),
+                parent_id: Some(0),
+                name: "My Drive".into(),
+                display_name: "My Drive".into(),
+                kind: "folder".into(),
+                mime: None,
+                size: 0,
+                md5: None,
+                modified_ms: 0,
+                head_revision: None,
+                trashed: false,
+                shared_drive_id: None,
+                state: NodeState::Cached,
+                pinned: false,
+                last_access_ms: 0,
+            })
+            .unwrap();
+        for f in drive.list_children("root") {
+            let id = store.next_id().unwrap();
+            store
+                .upsert_node(&Node {
+                    id,
+                    account_id: acct,
+                    drive_id: f.id,
+                    parent_id: Some(root_id),
+                    name: f.name.clone(),
+                    display_name: f.name,
+                    kind: "file".into(),
+                    mime: Some(f.mime_type),
+                    size: f.size as i64,
+                    md5: None,
+                    modified_ms: 0,
+                    head_revision: None,
+                    trashed: false,
+                    shared_drive_id: None,
+                    state: NodeState::Placeholder,
+                    pinned: false,
+                    last_access_ms: 0,
+                })
+                .unwrap();
+        }
+        assert_eq!(store.list_children(root_id).unwrap().len(), 1);
+    }
+}

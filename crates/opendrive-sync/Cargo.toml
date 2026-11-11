@@ -16,3 +16,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 parking_lot = { workspace = true }
+
+[dev-dependencies]
+opendrive-fake-drive = { path = "../opendrive-fake-drive" }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
