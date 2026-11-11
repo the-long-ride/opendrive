@@ -33,7 +33,7 @@ impl SyncEngine {
             );
         }
 
-        let (account_id, drive_id, name, parent_drive, size) = {
+        let (account_id, drive_id, name, parent_drive, size, parent_id) = {
             let store = self.store.lock();
             let n = store
                 .get_node(row.node_id)
@@ -44,7 +44,14 @@ impl SyncEngine {
                 .and_then(|pid| store.get_node(pid).ok().flatten())
                 .map(|p| p.drive_id)
                 .unwrap_or_else(|| "root".into());
-            (n.account_id, n.drive_id.clone(), n.name.clone(), parent_drive, n.size as u64)
+            (
+                n.account_id,
+                n.drive_id.clone(),
+                n.name.clone(),
+                parent_drive,
+                n.size as u64,
+                n.parent_id,
+            )
         };
 
         let token = {
@@ -61,7 +68,31 @@ impl SyncEngine {
                 self.upload_file(&client, &row, &drive_id, &name, &parent_drive, size)
                     .await
             }
-            "trash" => client.trash(&drive_id).await.map_err(|e| crate::SyncError::Other(e.to_string())),
+            "rename" => {
+                if drive_id.is_empty() {
+                    Ok(())
+                } else {
+                    let mut patch = serde_json::json!({ "name": name });
+                    // parents change needs addParents/removeParents query params in full API;
+                    // name-only patch for M1.
+                    let _ = parent_id;
+                    client
+                        .update_metadata(&drive_id, &patch)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| crate::SyncError::Other(e.to_string()))
+                }
+            }
+            "trash" => {
+                if drive_id.is_empty() {
+                    Ok(())
+                } else {
+                    client
+                        .trash(&drive_id)
+                        .await
+                        .map_err(|e| crate::SyncError::Other(e.to_string()))
+                }
+            }
             _ => Ok(()),
         };
 
@@ -73,11 +104,11 @@ impl SyncEngine {
                     n.state = NodeState::Cached;
                     let _ = store.upsert_node(&n);
                 }
-                info!(op_id = row.op_id, "upload done");
+                info!(op_id = row.op_id, op = %row.op, "queue op done");
                 Ok(true)
             }
             Err(e) => {
-                warn!(op_id = row.op_id, error = %e, "upload failed");
+                warn!(op_id = row.op_id, error = %e, "queue op failed");
                 let backoff = (1000i64 * (1 << row.attempts.min(6))).min(300_000);
                 let store = self.store.lock();
                 let _ = store.update_upload(
@@ -127,7 +158,6 @@ impl SyncEngine {
             u
         };
 
-        // Content still local-only in M0; empty body completes metadata-only create.
         let data: &[u8] = &[];
         let _ = client
             .upload_chunk(&uri, 0, total.max(0), data)
@@ -136,7 +166,6 @@ impl SyncEngine {
         Ok(())
     }
 
-    /// Spawn a background loop (call from app after runtime is up).
     pub fn spawn_worker(self: &Arc<Self>, interval: Duration) {
         let eng = Arc::clone(self);
         tokio::spawn(async move {
@@ -157,5 +186,3 @@ fn now_ms() -> i64 {
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }
-
-// re-export path for engine fields used above — SyncEngine fields are pub(crate) via same module tree
