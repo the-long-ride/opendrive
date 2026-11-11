@@ -46,8 +46,12 @@ impl SyncEngine {
 
     pub fn seed_root_account(&self, account_id: Uuid, folder_name: &str) -> Result<NodeId> {
         let store = self.store.lock();
+        if let Ok(Some(existing)) = store.find_by_drive_id(account_id, "root") {
+            return Ok(existing.id as NodeId);
+        }
+        let id = store.next_id().map_err(|e| SyncError::Other(e.to_string()))?;
         let n = Node {
-            id: 1,
+            id,
             account_id,
             drive_id: "root".into(),
             parent_id: Some(0),
@@ -66,17 +70,17 @@ impl SyncEngine {
             last_access_ms: 0,
         };
         store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
-        Ok(1)
+        Ok(id as NodeId)
     }
 
     pub async fn hydrate_folder(&self, account_id: Uuid, parent_node: NodeId) -> Result<()> {
-        let (drive_parent, next_id_base) = {
+        let drive_parent = {
             let store = self.store.lock();
             let n = store
                 .get_node(parent_node as i64)
                 .map_err(|e| SyncError::Other(e.to_string()))?
                 .ok_or(SyncError::NotFound)?;
-            (n.drive_id.clone(), parent_node as i64 * 1000 + 10)
+            n.drive_id.clone()
         };
 
         let token = {
@@ -95,7 +99,7 @@ impl SyncEngine {
             .map_err(|e| SyncError::Other(e.to_string()))?;
 
         let store = self.store.lock();
-        for (i, f) in list.files.into_iter().enumerate() {
+        for f in list.files {
             let kind = if f.mime_type == "application/vnd.google-apps.folder" {
                 "folder"
             } else if opendrive_drive::is_native_google_doc(&f.mime_type) {
@@ -103,8 +107,12 @@ impl SyncEngine {
             } else {
                 "file"
             };
+            let id = match store.find_by_drive_id(account_id, &f.id) {
+                Ok(Some(existing)) => existing.id,
+                _ => store.next_id().map_err(|e| SyncError::Other(e.to_string()))?,
+            };
             let n = Node {
-                id: next_id_base + i as i64,
+                id,
                 account_id,
                 drive_id: f.id,
                 parent_id: Some(parent_node as i64),
@@ -213,8 +221,7 @@ impl VfsEngine for SyncEngine {
                 .access_token
                 .clone()
         };
-        let client = DriveClient::new(token);
-        client
+        DriveClient::new(token)
             .download_range(&drive_id, offset, len)
             .await
             .map_err(|e| SyncError::Io(e.to_string()))
@@ -232,11 +239,7 @@ impl VfsEngine for SyncEngine {
     async fn create(&self, parent: NodeId, name: &OsStr, kind: Kind) -> Result<NodeAttr> {
         let name = name.to_string_lossy().to_string();
         let store = self.store.lock();
-        let id = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-            % i64::MAX as u128) as i64;
+        let id = store.next_id().map_err(|e| SyncError::Other(e.to_string()))?;
         let n = Node {
             id,
             account_id: Uuid::nil(),
