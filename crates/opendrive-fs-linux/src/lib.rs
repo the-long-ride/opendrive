@@ -1,5 +1,4 @@
 //! FUSE3 frontend (Linux).
-//! One mount at ~/OpenDrive; accounts as folders under synthetic root.
 
 use opendrive_sync::{Kind, NodeAttr, NodeId, VfsEngine};
 use std::ffi::OsStr;
@@ -11,8 +10,8 @@ use tracing::{debug, error};
 mod fuse_impl {
     use super::*;
     use fuser::{
-        FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory,
-        ReplyEntry, Request,
+        FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyCreate, ReplyData,
+        ReplyDirectory, ReplyEntry, ReplyWrite, Request,
     };
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -21,7 +20,6 @@ mod fuse_impl {
 
     pub struct FuseFs {
         engine: Arc<dyn VfsEngine>,
-        /// ino -> NodeId (1 = root)
         ino_map: Mutex<HashMap<u64, NodeId>>,
         next_ino: Mutex<u64>,
         rt: tokio::runtime::Handle,
@@ -30,7 +28,7 @@ mod fuse_impl {
     impl FuseFs {
         pub fn new(engine: Arc<dyn VfsEngine>, rt: tokio::runtime::Handle) -> Self {
             let mut map = HashMap::new();
-            map.insert(1, 0); // root node id 0
+            map.insert(1, 0);
             Self {
                 engine,
                 ino_map: Mutex::new(map),
@@ -93,8 +91,7 @@ mod fuse_impl {
             };
             let eng = self.engine.clone();
             let name = name.to_os_string();
-            let res = self.rt.block_on(async move { eng.lookup(parent_node, &name).await });
-            match res {
+            match self.rt.block_on(async move { eng.lookup(parent_node, &name).await }) {
                 Ok(Some(attr)) => {
                     let ino = self.alloc_ino(attr.id);
                     reply.entry(&TTL, &Self::attr_from(&attr, ino), 0);
@@ -137,8 +134,7 @@ mod fuse_impl {
                 return;
             };
             let eng = self.engine.clone();
-            let res = self.rt.block_on(async move { eng.stat(node).await });
-            match res {
+            match self.rt.block_on(async move { eng.stat(node).await }) {
                 Ok(attr) => reply.attr(&TTL, &Self::attr_from(&attr, ino)),
                 Err(_) => reply.error(libc::ENOENT),
             }
@@ -157,8 +153,7 @@ mod fuse_impl {
                 return;
             };
             let eng = self.engine.clone();
-            let res = self.rt.block_on(async move { eng.list(node, None).await });
-            match res {
+            match self.rt.block_on(async move { eng.list(node, None).await }) {
                 Ok(page) => {
                     let mut entries: Vec<(u64, FileType, String)> = vec![
                         (ino, FileType::Directory, ".".into()),
@@ -172,8 +167,7 @@ mod fuse_impl {
                         };
                         entries.push((child_ino, ft, e.name));
                     }
-                    for (i, (cino, ft, name)) in entries.into_iter().enumerate().skip(offset as usize)
-                    {
+                    for (i, (cino, ft, name)) in entries.into_iter().enumerate().skip(offset as usize) {
                         if reply.add(cino, (i + 1) as i64, ft, name) {
                             break;
                         }
@@ -203,15 +197,160 @@ mod fuse_impl {
                 return;
             };
             let eng = self.engine.clone();
-            let res = self
-                .rt
-                .block_on(async move { eng.read(node, offset as u64, size).await });
-            match res {
+            match self.rt.block_on(async move { eng.read(node, offset as u64, size).await }) {
                 Ok(data) => reply.data(&data),
                 Err(e) => {
                     debug!(?e, "read");
                     reply.error(libc::EIO);
                 }
+            }
+        }
+
+        fn write(
+            &mut self,
+            _req: &Request<'_>,
+            ino: u64,
+            _fh: u64,
+            offset: i64,
+            data: &[u8],
+            _write_flags: u32,
+            _flags: i32,
+            _lock_owner: Option<u64>,
+            reply: ReplyWrite,
+        ) {
+            let Some(node) = self.node_of(ino) else {
+                reply.error(libc::ENOENT);
+                return;
+            };
+            let eng = self.engine.clone();
+            let data = data.to_vec();
+            match self
+                .rt
+                .block_on(async move { eng.write(node, offset as u64, &data).await })
+            {
+                Ok(n) => reply.written(n),
+                Err(e) => {
+                    error!(?e, "write");
+                    reply.error(libc::EIO);
+                }
+            }
+        }
+
+        fn create(
+            &mut self,
+            _req: &Request<'_>,
+            parent: u64,
+            name: &OsStr,
+            _mode: u32,
+            _umask: u32,
+            _flags: i32,
+            reply: ReplyCreate,
+        ) {
+            let Some(parent_node) = self.node_of(parent) else {
+                reply.error(libc::ENOENT);
+                return;
+            };
+            let eng = self.engine.clone();
+            let name = name.to_os_string();
+            match self
+                .rt
+                .block_on(async move { eng.create(parent_node, &name, Kind::File).await })
+            {
+                Ok(attr) => {
+                    let ino = self.alloc_ino(attr.id);
+                    reply.created(&TTL, &Self::attr_from(&attr, ino), 0, 0, 0);
+                }
+                Err(e) => {
+                    error!(?e, "create");
+                    reply.error(libc::EIO);
+                }
+            }
+        }
+
+        fn mkdir(
+            &mut self,
+            _req: &Request<'_>,
+            parent: u64,
+            name: &OsStr,
+            _mode: u32,
+            _umask: u32,
+            reply: ReplyEntry,
+        ) {
+            let Some(parent_node) = self.node_of(parent) else {
+                reply.error(libc::ENOENT);
+                return;
+            };
+            let eng = self.engine.clone();
+            let name = name.to_os_string();
+            match self
+                .rt
+                .block_on(async move { eng.create(parent_node, &name, Kind::Folder).await })
+            {
+                Ok(attr) => {
+                    let ino = self.alloc_ino(attr.id);
+                    reply.entry(&TTL, &Self::attr_from(&attr, ino), 0);
+                }
+                Err(e) => {
+                    error!(?e, "mkdir");
+                    reply.error(libc::EIO);
+                }
+            }
+        }
+
+        fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: fuser::ReplyEmpty) {
+            let Some(parent_node) = self.node_of(parent) else {
+                reply.error(libc::ENOENT);
+                return;
+            };
+            let eng = self.engine.clone();
+            let name = name.to_os_string();
+            let res = self.rt.block_on(async move {
+                if let Some(attr) = eng.lookup(parent_node, &name).await? {
+                    eng.remove(attr.id).await?;
+                }
+                Ok::<(), opendrive_sync::SyncError>(())
+            });
+            match res {
+                Ok(()) => reply.ok(),
+                Err(_) => reply.error(libc::EIO),
+            }
+        }
+
+        fn rmdir(&mut self, req: &Request<'_>, parent: u64, name: &OsStr, reply: fuser::ReplyEmpty) {
+            self.unlink(req, parent, name, reply);
+        }
+
+        fn rename(
+            &mut self,
+            _req: &Request<'_>,
+            parent: u64,
+            name: &OsStr,
+            newparent: u64,
+            newname: &OsStr,
+            _flags: u32,
+            reply: fuser::ReplyEmpty,
+        ) {
+            let Some(parent_node) = self.node_of(parent) else {
+                reply.error(libc::ENOENT);
+                return;
+            };
+            let Some(new_parent) = self.node_of(newparent) else {
+                reply.error(libc::ENOENT);
+                return;
+            };
+            let eng = self.engine.clone();
+            let name = name.to_os_string();
+            let newname = newname.to_os_string();
+            let res = self.rt.block_on(async move {
+                let attr = eng
+                    .lookup(parent_node, &name)
+                    .await?
+                    .ok_or(opendrive_sync::SyncError::NotFound)?;
+                eng.rename(attr.id, new_parent, &newname).await
+            });
+            match res {
+                Ok(()) => reply.ok(),
+                Err(_) => reply.error(libc::EIO),
             }
         }
     }
@@ -251,7 +390,6 @@ impl FuseFrontend {
     }
 
     pub fn unmount(&self, path: &str) -> Result<(), String> {
-        // fusermount3 -u
         let _ = std::process::Command::new("fusermount3")
             .args(["-u", path])
             .status();

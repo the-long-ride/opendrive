@@ -7,10 +7,8 @@ use opendrive_store::NodeState;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{info, warn};
-use uuid::Uuid;
 
 impl SyncEngine {
-    /// Process one queue item if available. Returns true if work was done.
     pub async fn process_one_upload(&self) -> Result<bool> {
         let row = {
             let store = self.store.lock();
@@ -33,7 +31,7 @@ impl SyncEngine {
             );
         }
 
-        let (account_id, drive_id, name, parent_drive, size, parent_id) = {
+        let (account_id, drive_id, name, parent_drive, size) = {
             let store = self.store.lock();
             let n = store
                 .get_node(row.node_id)
@@ -50,7 +48,6 @@ impl SyncEngine {
                 n.name.clone(),
                 parent_drive,
                 n.size as u64,
-                n.parent_id,
             )
         };
 
@@ -63,21 +60,33 @@ impl SyncEngine {
         };
         let client = DriveClient::new(token);
 
+        let body = {
+            let staging = self.staging.lock();
+            staging
+                .as_ref()
+                .and_then(|s| s.read_all(row.node_id).ok())
+                .unwrap_or_default()
+        };
+
         let result = match row.op.as_str() {
             "create" | "update" => {
-                self.upload_file(&client, &row, &drive_id, &name, &parent_drive, size)
-                    .await
+                self.upload_file(
+                    &client,
+                    &row,
+                    &drive_id,
+                    &name,
+                    &parent_drive,
+                    size.max(body.len() as u64),
+                    &body,
+                )
+                .await
             }
             "rename" => {
                 if drive_id.is_empty() {
                     Ok(())
                 } else {
-                    let mut patch = serde_json::json!({ "name": name });
-                    // parents change needs addParents/removeParents query params in full API;
-                    // name-only patch for M1.
-                    let _ = parent_id;
                     client
-                        .update_metadata(&drive_id, &patch)
+                        .update_metadata(&drive_id, &serde_json::json!({ "name": name }))
                         .await
                         .map(|_| ())
                         .map_err(|e| crate::SyncError::Other(e.to_string()))
@@ -131,15 +140,13 @@ impl SyncEngine {
         name: &str,
         parent_drive: &str,
         total: u64,
+        data: &[u8],
     ) -> Result<()> {
         let uri = if let Some(ref u) = row.resumable_uri {
             u.clone()
         } else {
             let meta = if drive_id.is_empty() {
-                serde_json::json!({
-                    "name": name,
-                    "parents": [parent_drive]
-                })
+                serde_json::json!({ "name": name, "parents": [parent_drive] })
             } else {
                 serde_json::json!({ "name": name })
             };
@@ -148,21 +155,41 @@ impl SyncEngine {
                 .await
                 .map_err(|e| crate::SyncError::Other(e.to_string()))?;
             let store = self.store.lock();
-            let _ = store.update_upload(
-                row.op_id,
-                "in_progress",
-                row.attempts,
-                now_ms(),
-                Some(&u),
-            );
+            let _ = store.update_upload(row.op_id, "in_progress", row.attempts, now_ms(), Some(&u));
             u
         };
 
-        let data: &[u8] = &[];
-        let _ = client
-            .upload_chunk(&uri, 0, total.max(0), data)
-            .await
-            .map_err(|e| crate::SyncError::Other(e.to_string()))?;
+        // Chunk at 256 KiB
+        const CHUNK: usize = 256 * 1024;
+        let total = total.max(data.len() as u64);
+        if data.is_empty() && total == 0 {
+            let _ = client
+                .upload_chunk(&uri, 0, 0, &[])
+                .await
+                .map_err(|e| crate::SyncError::Other(e.to_string()))?;
+            return Ok(());
+        }
+        let mut offset = 0u64;
+        while offset < total {
+            let start = offset as usize;
+            let end = ((offset as usize) + CHUNK).min(data.len());
+            let chunk = if start < data.len() {
+                &data[start..end]
+            } else {
+                &[][..]
+            };
+            let done = client
+                .upload_chunk(&uri, offset, total, chunk)
+                .await
+                .map_err(|e| crate::SyncError::Other(e.to_string()))?;
+            offset += chunk.len() as u64;
+            if done.is_some() {
+                break;
+            }
+            if chunk.is_empty() {
+                break;
+            }
+        }
         Ok(())
     }
 
