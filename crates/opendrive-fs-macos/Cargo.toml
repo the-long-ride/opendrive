@@ -6,9 +6,11 @@ license.workspace = true
 
 [dependencies]
 opendrive-sync = { path = "../opendrive-sync" }
+bytes = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
+parking_lot = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# nfsserve = "0.10"  # enable for M3 live spike
+# nfsserve = "0.10"
