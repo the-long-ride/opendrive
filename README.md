@@ -1,23 +1,21 @@
 # OpenDrive
 
-Free, open-source multi-account Google Drive desktop client.
+Free, open-source multi-account Google Drive desktop client (Rust).
 
-**Status:** M0 engine path largely complete (auth, Drive, store, sync, FUSE read, CLI). Live CFAPI/NFS and GPUI still pending.
+**Status:** Engine + Linux FUSE read/write + CLI mount path working. Windows CFAPI, macOS NFS, and GPUI still stubs.
+
+## Quick start (Linux)
+
+```bash
+cargo build -p opendrive-app
+cargo run -p opendrive-app -- authorize <client_id> <client_secret>
+cargo run -p opendrive-app -- mount <access_token>
+# mounts at ~/OpenDrive
+```
 
 ## Docs
 
-- [Building](docs/building.md) · [Architecture](docs/architecture.md)
-- [M0 checklist](docs/M0-checklist.md) · [Open questions](docs/open-questions.md)
-- [OAuth setup](docs/oauth-setup.md) · [GPUI spike](docs/gpui-spike.md)
-
-## CLI
-
-```bash
-cargo run -p opendrive-app -- --self-check
-cargo run -p opendrive-app -- authorize <client_id> <client_secret>
-cargo run -p opendrive-app -- list-root <access_token>
-cargo run -p opendrive-app -- status
-```
+[Building](docs/building.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/ROADMAP.md) · [OAuth](docs/oauth-setup.md) · [Status](docs/M0-checklist.md)
 
 ## License
 

@@ -3,13 +3,12 @@
 ## Unreleased (0.1.0)
 
 ### Added
-- Cargo workspace: core, auth, drive, store, sync, fs-*, platform, fake-drive, app
-- OAuth PKCE + loopback + keyring + token refresh
-- Drive v3 client: about, list, changes, range download, resumable upload, trash
-- SQLite store: nodes, change tokens, upload queue
-- SyncEngine: VfsEngine, hydrate, staging, upload worker, change poller
-- Linux FUSE read path (fuser)
-- CLI: authorize, list-root, status, --self-check
-- AppController (UI-agnostic)
-- CFAPI/NFS op maps (stubs)
-- CI, release.yml skeleton, deny.toml, docs
+- Full workspace: core, auth, drive, store, sync, fs-*, platform, fake-drive, app
+- OAuth PKCE + loopback + keyring
+- Drive v3 client + resumable upload
+- SQLite store, upload queue, cache eviction
+- SyncEngine with staging writes, workers, change poller
+- Linux FUSE: lookup/read/write/create/mkdir/unlink/rename
+- CLI: authorize, list-root, status, mount, --self-check
+- Platform config/cache/data/mount paths via `dirs`
+- CI + release.yml skeleton
