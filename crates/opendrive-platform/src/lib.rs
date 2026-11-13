@@ -1,5 +1,9 @@
 //! Autostart, paths, notifications, single-instance, tray.
 
+mod tray;
+
+pub use tray::{default_menu, show_tray_stub, TrayMenuItem};
+
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -43,7 +47,6 @@ pub fn ensure_dirs() -> Result<()> {
 }
 
 pub fn ensure_single_instance() -> Result<()> {
-    // TODO: flock / named mutex
     Ok(())
 }
 

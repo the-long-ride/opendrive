@@ -1,24 +1,19 @@
 # Status
 
-## Done
+## Done (engine + Linux)
 
-- [x] OAuth PKCE + loopback + keyring + refresh
-- [x] Drive client (about, list, changes, range, resumable, trash, metadata)
-- [x] SQLite store + upload queue + cache eviction helpers
-- [x] SyncEngine + staging + write + rename + workers + change poller
-- [x] Linux FUSE read **and write** (create/mkdir/write/unlink/rename)
-- [x] CLI: authorize, list-root, status, **mount**, --self-check
-- [x] Platform dirs, release.yml, docs, deny.toml
+- OAuth, Drive, store, SyncEngine, staging, workers, change poller
+- Linux FUSE full read/write path + CLI `mount`
+- Windows `ProviderBridge` (ready for cloud-filter)
+- macOS `NfsBackend` (ready for nfsserve)
+- Tray menu model (no live icon yet)
 
-## Remaining (need target OS / heavy deps)
+## Remaining
 
-- [ ] Windows Cloud Files **live** (`cloud-filter` on Windows host)
-- [ ] macOS NFS **live** (`nfsserve` + mount_nfs on macOS host)
-- [ ] GPUI window + system tray
+| Item | Needs |
+|------|--------|
+| CFAPI live | Windows host + enable `cloud-filter` dep |
+| NFS live | macOS host + enable `nfsserve` |
+| GPUI + tray icon | Pin GPUI; wire `tray-icon` |
 
-## Try on Linux
-
-```bash
-cargo run -p opendrive-app -- authorize <id> <secret>
-cargo run -p opendrive-app -- mount <access_token> ~/OpenDrive
-```
+These cannot be finished from a headless Linux CI agent alone.
