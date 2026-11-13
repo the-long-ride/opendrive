@@ -21,7 +21,7 @@ pub struct SyncEngine {
     pub(crate) store: Arc<Mutex<Store>>,
     pub(crate) clients: Mutex<HashMap<Uuid, DriveClient>>,
     pub(crate) events: Mutex<Option<mpsc::Sender<EngineEvent>>>,
-    staging: Mutex<Option<StagingDir>>,
+    pub(crate) staging: Mutex<Option<StagingDir>>,
 }
 
 impl SyncEngine {
@@ -76,13 +76,13 @@ impl SyncEngine {
     pub async fn hydrate_folder(&self, account_id: Uuid, parent_node: NodeId) -> Result<()> {
         let drive_parent = {
             let store = self.store.lock();
-            let n = store
+            store
                 .get_node(parent_node as i64)
                 .map_err(|e| SyncError::Other(e.to_string()))?
-                .ok_or(SyncError::NotFound)?;
-            n.drive_id.clone()
+                .ok_or(SyncError::NotFound)?
+                .drive_id
+                .clone()
         };
-
         let token = {
             let clients = self.clients.lock();
             clients
@@ -91,13 +91,10 @@ impl SyncEngine {
                 .access_token
                 .clone()
         };
-        let client = DriveClient::new(token);
-
-        let list = client
+        let list = DriveClient::new(token)
             .list_files(&drive_parent, None, true)
             .await
             .map_err(|e| SyncError::Other(e.to_string()))?;
-
         let store = self.store.lock();
         for f in list.files {
             let kind = if f.mime_type == "application/vnd.google-apps.folder" {
@@ -111,26 +108,27 @@ impl SyncEngine {
                 Ok(Some(existing)) => existing.id,
                 _ => store.next_id().map_err(|e| SyncError::Other(e.to_string()))?,
             };
-            let n = Node {
-                id,
-                account_id,
-                drive_id: f.id,
-                parent_id: Some(parent_node as i64),
-                name: f.name.clone(),
-                display_name: f.name,
-                kind: kind.into(),
-                mime: Some(f.mime_type),
-                size: f.size.unwrap_or(0) as i64,
-                md5: f.md5,
-                modified_ms: 0,
-                head_revision: f.head_revision_id,
-                trashed: f.trashed,
-                shared_drive_id: None,
-                state: NodeState::Placeholder,
-                pinned: false,
-                last_access_ms: 0,
-            };
-            store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
+            store
+                .upsert_node(&Node {
+                    id,
+                    account_id,
+                    drive_id: f.id,
+                    parent_id: Some(parent_node as i64),
+                    name: f.name.clone(),
+                    display_name: f.name,
+                    kind: kind.into(),
+                    mime: Some(f.mime_type),
+                    size: f.size.unwrap_or(0) as i64,
+                    md5: f.md5,
+                    modified_ms: 0,
+                    head_revision: f.head_revision_id,
+                    trashed: f.trashed,
+                    shared_drive_id: None,
+                    state: NodeState::Placeholder,
+                    pinned: false,
+                    last_access_ms: 0,
+                })
+                .map_err(|e| SyncError::Other(e.to_string()))?;
         }
         Ok(())
     }
@@ -174,18 +172,17 @@ impl VfsEngine for SyncEngine {
     async fn lookup(&self, parent: NodeId, name: &OsStr) -> Result<Option<NodeAttr>> {
         let name = name.to_string_lossy();
         let store = self.store.lock();
-        let children = store
+        Ok(store
             .list_children(parent as i64)
-            .map_err(|e| SyncError::Other(e.to_string()))?;
-        Ok(children
+            .map_err(|e| SyncError::Other(e.to_string()))?
             .iter()
             .find(|n| n.display_name == name || n.name == name)
             .map(to_attr))
     }
 
     async fn stat(&self, node: NodeId) -> Result<NodeAttr> {
-        let store = self.store.lock();
-        store
+        self.store
+            .lock()
             .get_node(node as i64)
             .map_err(|e| SyncError::Other(e.to_string()))?
             .map(|n| to_attr(&n))
@@ -204,7 +201,6 @@ impl VfsEngine for SyncEngine {
                 }
             }
         }
-
         let (account_id, drive_id) = {
             let store = self.store.lock();
             let n = store
@@ -229,11 +225,31 @@ impl VfsEngine for SyncEngine {
 
     async fn open_write(&self, node: NodeId) -> Result<WriteHandle> {
         if let Some(ref staging) = *self.staging.lock() {
-            let _ = staging
+            staging
                 .open_write(node as i64)
                 .map_err(|e| SyncError::Io(e.to_string()))?;
         }
         Ok(WriteHandle { node })
+    }
+
+    async fn write(&self, node: NodeId, offset: u64, data: &[u8]) -> Result<u32> {
+        if let Some(ref staging) = *self.staging.lock() {
+            staging
+                .write_at(node as i64, offset, data)
+                .map_err(|e| SyncError::Io(e.to_string()))?;
+        }
+        let store = self.store.lock();
+        if let Some(mut n) = store
+            .get_node(node as i64)
+            .map_err(|e| SyncError::Other(e.to_string()))?
+        {
+            let new_size = (offset as i64 + data.len() as i64).max(n.size);
+            n.size = new_size;
+            n.state = NodeState::Dirty;
+            store.upsert_node(&n).map_err(|e| SyncError::Other(e.to_string()))?;
+            let _ = store.enqueue_upload(node as i64, "update", n.head_revision.as_deref());
+        }
+        Ok(data.len() as u32)
     }
 
     async fn create(&self, parent: NodeId, name: &OsStr, kind: Kind) -> Result<NodeAttr> {
@@ -330,10 +346,9 @@ impl VfsEngine for SyncEngine {
     }
 
     async fn stats(&self) -> EngineStats {
-        let depth = self.store.lock().queue_depth().unwrap_or(0);
         EngineStats {
             transfers: 0,
-            queue_depth: depth,
+            queue_depth: self.store.lock().queue_depth().unwrap_or(0),
             errors: 0,
         }
     }
