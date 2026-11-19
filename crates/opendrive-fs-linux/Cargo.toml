@@ -11,5 +11,5 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-fuser = "0.14"
+fuser = "0.16"
 libc = "0.2"
