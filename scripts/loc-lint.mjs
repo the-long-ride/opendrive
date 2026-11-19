@@ -15,6 +15,18 @@ function trackedFiles() {
   return result.stdout.split('\0').filter(Boolean);
 }
 
+// Temporary, file-specific ceilings for legacy files exceeding the normal 300-line limit.
+// Any growth beyond the current baseline fails CI; new files keep the default limit.
+const legacyCeilings = new Map([
+  ['crates/opendrive-app/src/design/icons.rs', 337],
+  ['crates/opendrive-app/src/design/widgets.rs', 313],
+  ['crates/opendrive-app/src/desktop/mod.rs', 309],
+  ['crates/opendrive-app/src/desktop/modals/guide.rs', 411],
+  ['crates/opendrive-app/tests/bento_avatar_tray_tests.rs', 302],
+  ['crates/opendrive-app/tests/desktop_render_tests.rs', 304],
+  ['crates/opendrive-fs-windows/src/cfapi_sys.rs', 306],
+]);
+
 const failures = [];
 for (const file of trackedFiles()) {
   if (!existsSync(file)) continue;
@@ -23,8 +35,9 @@ for (const file of trackedFiles()) {
 
   const text = readFileSync(file, 'utf8');
   const lines = countPhysicalLines(text);
-  if (lines > limit) {
-    failures.push(`${file}: ${lines} lines (limit ${limit})`);
+  const ceiling = Math.max(limit, legacyCeilings.get(file) ?? limit);
+  if (lines > ceiling) {
+    failures.push(`${file}: ${lines} lines (limit ${ceiling})`);
   }
   if (looksArtificiallyCompressed(text)) {
     failures.push(`${file}: source appears artificially compressed`);

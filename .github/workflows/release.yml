@@ -9,6 +9,22 @@ on:
         required: false
         type: string
 
+  workflow_call:
+    inputs:
+      artifact_only:
+        description: 'Build artifacts without creating a GitHub release'
+        type: boolean
+        default: false
+      build_windows:
+        type: boolean
+        default: true
+      build_linux:
+        type: boolean
+        default: true
+      build_macos:
+        type: boolean
+        default: true
+
 permissions:
   contents: read
 
@@ -20,33 +36,51 @@ jobs:
       version: ${{ steps.ver.outputs.version }}
       ref_sha: ${{ steps.ver.outputs.ref_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - id: ver
         shell: bash
+        env:
+          ARTIFACT_ONLY: ${{ inputs.artifact_only }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
-          CARGO_VER=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag }}"
-            if [ -z "$TAG" ]; then
-              TAG="v${CARGO_VER}"
-            fi
-          else
-            TAG="${GITHUB_REF_NAME}"
-          fi
-          VER="${TAG#v}"
-          if [ "$VER" != "$CARGO_VER" ]; then
-            echo "Version mismatch: Cargo.toml=$CARGO_VER vs tag=$TAG"
-            exit 1
-          fi
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            TARGET_SHA=$(git rev-parse "${TAG}^{commit}")
-          else
+          set -euo pipefail
+          if [ "$ARTIFACT_ONLY" = "true" ]; then
             TARGET_SHA=$(git rev-parse HEAD)
+            VER=$(sed -n 's/^version = "\\([^"]*\\)".*/\\1/p' Cargo.toml | head -n 1)
+            TAG="v${VER}-manual-${TARGET_SHA:0:7}"
+          else
+            TAG="$REQUESTED_TAG"
+            if [ -z "$TAG" ] && [ "$REF_TYPE" = "tag" ]; then
+              TAG="$GITHUB_REF_NAME"
+            fi
+            if [ -z "$TAG" ]; then
+              echo "Select an existing tag under 'Use workflow from', or enter the tag input." >&2
+              exit 1
+            fi
+            if [[ ! "$TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+([.-][a-zA-Z0-9.-]+)?$ ]]; then
+              echo "Invalid version tag: $TAG" >&2
+              exit 1
+            fi
+            if ! git show-ref --verify --quiet "refs/tags/$TAG"; then
+              echo "Release tag does not exist: $TAG" >&2
+              exit 1
+            fi
+            TARGET_SHA=$(git rev-parse "refs/tags/${TAG}^{commit}")
+            if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
+              echo "Tag $TAG must point to a commit on main" >&2
+              exit 1
+            fi
+            VER=$(git show "${TARGET_SHA}:Cargo.toml" | sed -n 's/^version = "\\([^"]*\\)".*/\\1/p' | head -n 1)
+            if [ "${TAG#v}" != "$VER" ]; then
+              echo "Version mismatch: Cargo.toml=$VER vs tag=$TAG" >&2
+              exit 1
+            fi
           fi
-          if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
-            echo "Tag/commit $TARGET_SHA is not on main"
+          if [ -z "$VER" ]; then
+            echo "Could not determine workspace Cargo version" >&2
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -54,10 +88,11 @@ jobs:
           echo "ref_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
 
   build-windows:
+    if: ${{ !inputs.artifact_only || inputs.build_windows }}
     needs: gate
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.gate.outputs.ref_sha }}
       - uses: dtolnay/rust-toolchain@stable
@@ -121,15 +156,18 @@ jobs:
             dist/opendrive-*-windows-x86_64-setup.exe
 
   build-linux:
+    if: ${{ !inputs.artifact_only || inputs.build_linux }}
     needs: gate
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.gate.outputs.ref_sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libdbus-1-dev libfuse3-dev
       - run: cargo build -p opendrive-app --release --locked --target x86_64-unknown-linux-gnu
       - name: Package tarball, Debian (.deb), and AppImage
         shell: bash
@@ -186,10 +224,11 @@ jobs:
             dist/opendrive-*-linux-x86_64.AppImage
 
   build-macos:
+    if: ${{ !inputs.artifact_only || inputs.build_macos }}
     needs: gate
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.gate.outputs.ref_sha }}
       - uses: dtolnay/rust-toolchain@stable
@@ -232,13 +271,15 @@ jobs:
             dist/opendrive-*-macos-arm64-installer.dmg
 
   publish:
+    if: ${{ !inputs.artifact_only }}
     needs: [gate, build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
+          ref: ${{ needs.gate.outputs.ref_sha }}
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:

@@ -1,0 +1,49 @@
+name: Manual Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows:
+        description: 'Windows x86_64 (portable ZIP and NSIS installer)'
+        type: boolean
+        required: true
+        default: true
+      linux:
+        description: 'Linux x86_64 (tar.gz, deb, AppImage)'
+        type: boolean
+        required: true
+        default: true
+      macos:
+        description: 'macOS Apple Silicon (ZIP and DMG)'
+        type: boolean
+        required: true
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require at least one target
+        env:
+          WINDOWS: ${{ inputs.windows }}
+          LINUX: ${{ inputs.linux }}
+          MACOS: ${{ inputs.macos }}
+        run: |
+          if [ "$WINDOWS" != "true" ] && [ "$LINUX" != "true" ] && [ "$MACOS" != "true" ]; then
+            echo "Select at least one OS to build." >&2
+            exit 1
+          fi
+
+  build:
+    needs: validate
+    uses: ./.github/workflows/release.yml
+    with:
+      artifact_only: true
+      build_windows: ${{ inputs.windows }}
+      build_linux: ${{ inputs.linux }}
+      build_macos: ${{ inputs.macos }}
+    permissions:
+      contents: read
