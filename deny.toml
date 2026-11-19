@@ -5,6 +5,8 @@ all-features = false
 allow = [
     "MIT",
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "Unlicense",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
@@ -26,6 +28,9 @@ multiple-versions = "warn"
 wildcards = "deny"
 
 [advisories]
+# Keep vulnerability and unsoundness checks strict; flag unmaintained transitive crates
+# for review while still rejecting unmaintained direct workspace dependencies.
+unmaintained = "workspace"
 yanked = "deny"
 
 [sources]

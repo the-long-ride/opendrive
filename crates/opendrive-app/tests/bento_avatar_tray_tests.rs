@@ -68,12 +68,9 @@ fn total_storage_summary_and_logo_rgba_work() {
 
     let rgba = render_logo_rgba(32);
     assert_eq!(rgba.len(), 32 * 32 * 4);
-    assert!(rgba
-        .chunks_exact(4)
-        .any(|px| px == [0xff, 0x3d, 0x7f, 0xff]));
-    assert!(rgba
-        .chunks_exact(4)
-        .any(|px| px == [0x00, 0xd4, 0xff, 0xff]));
+    let pixels = rgba.as_chunks::<4>().0;
+    assert!(pixels.contains(&[0xff, 0x3d, 0x7f, 0xff]));
+    assert!(pixels.contains(&[0x00, 0xd4, 0xff, 0xff]));
     let icon = logo_icon_data(64);
     assert_eq!((icon.width, icon.height), (64, 64));
 

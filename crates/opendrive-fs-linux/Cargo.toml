@@ -5,11 +5,11 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-opendrive-sync = { path = "../opendrive-sync" }
+opendrive-sync = { path = "../opendrive-sync", version = "0.1.0" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-fuser = "0.14"
+fuser = "0.16"
 libc = "0.2"

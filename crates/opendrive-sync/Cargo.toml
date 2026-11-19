@@ -5,9 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-opendrive-core = { path = "../opendrive-core" }
-opendrive-store = { path = "../opendrive-store" }
-opendrive-drive = { path = "../opendrive-drive" }
+opendrive-core = { path = "../opendrive-core", version = "0.1.0" }
+opendrive-store = { path = "../opendrive-store", version = "0.1.0" }
+opendrive-drive = { path = "../opendrive-drive", version = "0.1.0" }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
@@ -19,5 +19,5 @@ uuid = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]
-opendrive-fake-drive = { path = "../opendrive-fake-drive" }
+opendrive-fake-drive = { path = "../opendrive-fake-drive", version = "0.1.0" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

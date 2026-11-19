@@ -68,6 +68,8 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libdbus-1-dev libfuse3-dev
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:

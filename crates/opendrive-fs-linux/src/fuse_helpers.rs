@@ -3,7 +3,7 @@
 use crate::fuse_sys::FuseFs;
 use crate::inode_table::InodeTable;
 use fuser::{FileAttr, FileType, MountOption, ReplyEntry};
-use opendrive_sync::{Kind, NodeAttr, NodeId, VfsEngine};
+use opendrive_sync::{Kind, NodeAttr, VfsEngine};
 use std::ffi::OsStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -82,10 +82,6 @@ pub fn create_dir_entry(
             reply.error(libc::EIO);
         }
     }
-}
-
-pub fn resolve_node(inodes: &InodeTable, ino: u64) -> Option<NodeId> {
-    inodes.node_of(ino)
 }
 
 pub fn mount(engine: Arc<dyn VfsEngine>, path: &str) -> Result<(), String> {
