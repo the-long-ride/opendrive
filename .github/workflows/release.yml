@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v0.1.0; defaults to Cargo.toml version)'
+        description: 'Existing tag (e.g. v0.1.0). Enter when running on main; omit if running on a tag.'
         required: false
         type: string
 
@@ -40,52 +40,13 @@ jobs:
         with:
           fetch-depth: 0
       - id: ver
+        name: Validate release tag and resolve commit
         shell: bash
         env:
           ARTIFACT_ONLY: ${{ inputs.artifact_only }}
           REQUESTED_TAG: ${{ inputs.tag }}
           REF_TYPE: ${{ github.ref_type }}
-        run: |
-          set -euo pipefail
-          if [ "$ARTIFACT_ONLY" = "true" ]; then
-            TARGET_SHA=$(git rev-parse HEAD)
-            VER=$(sed -n 's/^version = "\\([^"]*\\)".*/\\1/p' Cargo.toml | head -n 1)
-            TAG="v${VER}-manual-${TARGET_SHA:0:7}"
-          else
-            TAG="$REQUESTED_TAG"
-            if [ -z "$TAG" ] && [ "$REF_TYPE" = "tag" ]; then
-              TAG="$GITHUB_REF_NAME"
-            fi
-            if [ -z "$TAG" ]; then
-              echo "Select an existing tag under 'Use workflow from', or enter the tag input." >&2
-              exit 1
-            fi
-            if [[ ! "$TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+([.-][a-zA-Z0-9.-]+)?$ ]]; then
-              echo "Invalid version tag: $TAG" >&2
-              exit 1
-            fi
-            if ! git show-ref --verify --quiet "refs/tags/$TAG"; then
-              echo "Release tag does not exist: $TAG" >&2
-              exit 1
-            fi
-            TARGET_SHA=$(git rev-parse "refs/tags/${TAG}^{commit}")
-            if ! git merge-base --is-ancestor "$TARGET_SHA" origin/main; then
-              echo "Tag $TAG must point to a commit on main" >&2
-              exit 1
-            fi
-            VER=$(git show "${TARGET_SHA}:Cargo.toml" | sed -n 's/^version = "\\([^"]*\\)".*/\\1/p' | head -n 1)
-            if [ "${TAG#v}" != "$VER" ]; then
-              echo "Version mismatch: Cargo.toml=$VER vs tag=$TAG" >&2
-              exit 1
-            fi
-          fi
-          if [ -z "$VER" ]; then
-            echo "Could not determine workspace Cargo version" >&2
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "ref_sha=$TARGET_SHA" >> "$GITHUB_OUTPUT"
+        run: bash scripts/release-gate.sh
 
   build-windows:
     if: ${{ !inputs.artifact_only || inputs.build_windows }}
