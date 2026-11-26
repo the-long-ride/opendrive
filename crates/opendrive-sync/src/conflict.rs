@@ -1,7 +1,7 @@
 //! Conflict policy: never silent LWW; upload as sibling copy.
 
 use crate::queue::conflict_name;
-use opendrive_store::{Node, NodeState, Store};
+use opendrive_store::{now_ms, Node, NodeState, Store};
 
 /// If local base_revision != remote head, create a conflict sibling node locally.
 pub fn materialize_conflict_sibling(
@@ -69,13 +69,6 @@ fn chrono_date() -> String {
     format!("{y:04}-{m:02}-{d:02}")
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,6 +93,19 @@ mod tests {
     #[test]
     fn hostname_fallback_is_non_empty() {
         assert!(!hostname_fallback().is_empty());
+        let (h, c) = (
+            std::env::var_os("HOSTNAME"),
+            std::env::var_os("COMPUTERNAME"),
+        );
+        std::env::remove_var("HOSTNAME");
+        std::env::remove_var("COMPUTERNAME");
+        assert_eq!(hostname_fallback(), "local");
+        if let Some(v) = h {
+            std::env::set_var("HOSTNAME", v);
+        }
+        if let Some(v) = c {
+            std::env::set_var("COMPUTERNAME", v);
+        }
     }
 
     #[test]

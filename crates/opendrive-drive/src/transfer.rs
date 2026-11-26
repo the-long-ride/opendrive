@@ -5,6 +5,47 @@ use crate::types::{Change, ChangeList, DriveError, DriveFile, FileJson, Result};
 use serde::Deserialize;
 
 impl DriveClient {
+    /// Resolves the canonical remote ID for the user's `"root"` ("My Drive") folder.
+    pub async fn root_folder_id(&self) -> Result<String> {
+        #[derive(Deserialize)]
+        struct Resp {
+            id: String,
+        }
+        crate::retry::with_backoff(
+            || async move {
+                let req = self
+                    .auth(self.http.get(format!("{}/files/root", self.api_base)))
+                    .query(&[("fields", "id"), ("supportsAllDrives", "true")]);
+                let body: Resp = self.send_json(req).await?;
+                Ok(body.id)
+            },
+            5,
+        )
+        .await
+    }
+
+    /// Queries top-level unparented items omitted from `'root' in parents` (orphans / link-opened files).
+    pub async fn list_top_unparented_files(&self) -> Result<Vec<DriveFile>> {
+        let list = crate::retry::with_backoff(
+            || async move {
+                self.list_query_once(
+                    "trashed = false and not 'root' in parents",
+                    None,
+                    true,
+                    Some("viewedByMeTime desc,modifiedTime desc"),
+                )
+                .await
+            },
+            5,
+        )
+        .await?;
+        Ok(list
+            .files
+            .into_iter()
+            .filter(|f| f.parents.is_empty())
+            .collect())
+    }
+
     pub async fn get_start_page_token(&self) -> Result<String> {
         #[derive(Deserialize)]
         struct Resp {
@@ -132,6 +173,7 @@ impl DriveClient {
                 self.http
                     .patch(format!("{}/files/{file_id}", self.api_base)),
             )
+            .query(&[("supportsAllDrives", "true")])
             .json(&serde_json::json!({ "trashed": true }))
             .send()
             .await
@@ -150,8 +192,50 @@ impl DriveClient {
                 self.http
                     .patch(format!("{}/files/{file_id}", self.api_base)),
             )
-            .query(&[("supportsAllDrives", "true")])
+            .query(&[("supportsAllDrives", "true"), ("fields", FILE_FIELDS)])
             .json(patch);
+        let f: FileJson = self.send_json(req).await?;
+        Ok(f.into())
+    }
+
+    pub async fn copy_file(&self, file_id: &str, name: &str, parent_id: &str) -> Result<DriveFile> {
+        let req = self
+            .auth(
+                self.http
+                    .post(format!("{}/files/{file_id}/copy", self.api_base)),
+            )
+            .query(&[("supportsAllDrives", "true"), ("fields", FILE_FIELDS)])
+            .json(&serde_json::json!({ "name": name, "parents": [parent_id] }));
+        let f: FileJson = self.send_json(req).await?;
+        Ok(f.into())
+    }
+
+    pub async fn move_file(
+        &self,
+        file_id: &str,
+        add_parent: &str,
+        remove_parents: &str,
+        name: Option<&str>,
+    ) -> Result<DriveFile> {
+        let mut q = vec![
+            ("supportsAllDrives", "true"),
+            ("fields", FILE_FIELDS),
+            ("addParents", add_parent),
+        ];
+        if !remove_parents.is_empty() {
+            q.push(("removeParents", remove_parents));
+        }
+        let body = match name {
+            Some(n) => serde_json::json!({ "name": n }),
+            None => serde_json::json!({}),
+        };
+        let req = self
+            .auth(
+                self.http
+                    .patch(format!("{}/files/{file_id}", self.api_base)),
+            )
+            .query(&q)
+            .json(&body);
         let f: FileJson = self.send_json(req).await?;
         Ok(f.into())
     }

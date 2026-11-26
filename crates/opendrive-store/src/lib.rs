@@ -4,10 +4,10 @@ mod cache;
 mod queue_store;
 mod types;
 
-pub use types::{Node, NodeState, Result, StoreError, UploadRow, SCHEMA_SQL};
+pub use types::{now_ms, Node, NodeState, Result, StoreError, UploadRow, SCHEMA_SQL};
 
 use rusqlite::{params, Connection, OptionalExtension};
-use types::{now_ms, row_to_node};
+use types::row_to_node;
 use uuid::Uuid;
 
 const NODE_COLS: &str = "id, account_id, drive_id, parent_id, name, display_name, kind, mime, size, md5, modified_ms, head_revision, trashed, shared_drive_id, state, pinned, last_access_ms";
@@ -106,6 +106,39 @@ impl Store {
             out.push(row?);
         }
         Ok(out)
+    }
+
+    pub fn list_children_sorted(&self, parent_id: i64) -> Result<Vec<Node>> {
+        let sql = format!(
+            "SELECT {NODE_COLS} FROM nodes WHERE parent_id=?1 AND trashed=0
+             ORDER BY (kind = 'folder') DESC, LOWER(display_name) ASC, LOWER(name) ASC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![parent_id], row_to_node)?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    pub fn update_node_state(
+        &self,
+        node_id: i64,
+        state: NodeState,
+        pinned: Option<bool>,
+    ) -> Result<bool> {
+        let updated = match pinned {
+            Some(p) => self.conn.execute(
+                "UPDATE nodes SET state=?1, pinned=?2 WHERE id=?3",
+                params![state.as_str(), p as i32, node_id],
+            )?,
+            None => self.conn.execute(
+                "UPDATE nodes SET state=?1 WHERE id=?2",
+                params![state.as_str(), node_id],
+            )?,
+        };
+        Ok(updated > 0)
     }
 
     pub fn mark_drive_id_trashed(&self, account_id: Uuid, drive_id: &str) -> Result<bool> {

@@ -9,7 +9,7 @@ use serde::Deserialize;
 const BASE: &str = "https://www.googleapis.com/drive/v3";
 const UPLOAD_BASE: &str = "https://www.googleapis.com/upload/drive/v3";
 pub(crate) const FILE_FIELDS: &str =
-    "id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed,headRevisionId,shortcutDetails(targetId,targetMimeType)";
+    "id,name,mimeType,size,md5Checksum,modifiedTime,parents,trashed,ownedByMe,sharedWithMeTime,headRevisionId,shortcutDetails(targetId,targetMimeType)";
 
 #[derive(Clone)]
 pub struct DriveClient {
@@ -168,6 +168,7 @@ impl DriveClient {
                         "sharedWithMe = true and trashed = false",
                         page_token.as_deref(),
                         true,
+                        None,
                     )
                     .await
                 }
@@ -191,7 +192,7 @@ impl DriveClient {
                 let page_token = page_token.clone();
                 async move {
                     let q = format!("'{parent}' in parents and trashed = false");
-                    self.list_query_once(&q, page_token.as_deref(), supports_all_drives)
+                    self.list_query_once(&q, page_token.as_deref(), supports_all_drives, None)
                         .await
                 }
             },
@@ -200,11 +201,12 @@ impl DriveClient {
         .await
     }
 
-    async fn list_query_once(
+    pub(crate) async fn list_query_once(
         &self,
         q: &str,
         page_token: Option<&str>,
         supports_all_drives: bool,
+        order_by: Option<&str>,
     ) -> Result<FileList> {
         #[derive(Deserialize)]
         struct Resp {
@@ -216,6 +218,9 @@ impl DriveClient {
         let mut req = self
             .auth(self.http.get(format!("{}/files", self.api_base)))
             .query(&[("q", q), ("fields", fields.as_str()), ("pageSize", "100")]);
+        if let Some(ord) = order_by {
+            req = req.query(&[("orderBy", ord)]);
+        }
         if supports_all_drives {
             req = req.query(&[
                 ("supportsAllDrives", "true"),

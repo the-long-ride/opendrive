@@ -3,11 +3,16 @@
 mod accounts_io;
 mod controller;
 mod credentials_io;
+mod open_rules;
 mod settings_io;
 
 pub use accounts_io::{accounts_path, load_accounts, save_accounts};
 pub use controller::{AppCommand, AppController, AppEvent};
 pub use credentials_io::{credentials_path, load_credentials, save_credentials};
+pub use open_rules::{
+    classify_media_kind, normalize_rule_tokens, resolve_open_app, supports_http_stream_arg,
+    validate_open_with_rule, MediaKind, OpenWithRule,
+};
 pub use settings_io::{load_settings, save_settings, settings_path};
 
 pub fn default_account_alias(nickname: &str, email: &str) -> String {
@@ -83,6 +88,10 @@ fn default_virtual_drive_letter() -> String {
     "O".into()
 }
 
+fn default_explorer_folder_cache() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Settings {
     pub root_path: String,
@@ -98,6 +107,10 @@ pub struct Settings {
     pub virtual_drive_letter: String,
     #[serde(default)]
     pub ignored_release_version: Option<String>,
+    #[serde(default)]
+    pub open_with_rules: Vec<OpenWithRule>,
+    #[serde(default = "default_explorer_folder_cache")]
+    pub explorer_folder_cache: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -120,6 +133,8 @@ impl Default for Settings {
             virtual_drive_enabled: false,
             virtual_drive_letter: default_virtual_drive_letter(),
             ignored_release_version: None,
+            open_with_rules: Vec::new(),
+            explorer_folder_cache: true,
         }
     }
 }
@@ -203,5 +218,20 @@ impl AccountManager {
             return Err(CoreError::AccountNotFound(id));
         }
         Ok(())
+    }
+
+    pub fn move_account(&mut self, id: Uuid, delta: isize) -> Result<bool> {
+        let idx = self
+            .accounts
+            .iter()
+            .position(|a| a.id == id)
+            .ok_or(CoreError::AccountNotFound(id))?;
+        let target = (idx as isize + delta).clamp(0, self.accounts.len() as isize - 1) as usize;
+        if target == idx {
+            return Ok(false);
+        }
+        let account = self.accounts.remove(idx);
+        self.accounts.insert(target, account);
+        Ok(true)
     }
 }

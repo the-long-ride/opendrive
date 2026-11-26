@@ -26,7 +26,8 @@ impl VfsEngine for SyncEngine {
             if let Some(mut folder) = maybe_folder {
                 if folder.kind == "folder"
                     && !folder.drive_id.is_empty()
-                    && folder.state == NodeState::Placeholder
+                    && (folder.state == NodeState::Placeholder
+                        || folder.drive_id == crate::engine::SHARED_WITH_ME_DRIVE_ID)
                 {
                     self.hydrate_folder(folder.account_id, node).await?;
                     folder.state = NodeState::Cached;
@@ -88,26 +89,7 @@ impl VfsEngine for SyncEngine {
             return Ok(slice);
         }
 
-        let (account_id, drive_id) = {
-            let store = self.store.lock();
-            let n = store
-                .get_node(node as i64)
-                .map_err(sync_err)?
-                .ok_or(SyncError::NotFound)?;
-            let _ = store.touch_access(node as i64);
-            (n.account_id, n.drive_id.clone())
-        };
-        let client = self.drive_client_for(account_id)?;
-        let bytes = match client.download_range(&drive_id, offset, len).await {
-            Ok(b) => b,
-            Err(e) => {
-                self.errors.fetch_add(1, Ordering::Relaxed);
-                return Err(SyncError::Io(e.to_string()));
-            }
-        };
-        self.limiter.take(bytes.len() as u64).await;
-        self.transfers.fetch_add(1, Ordering::Relaxed);
-        Ok(bytes)
+        self.read_cached_range(node, offset, len, 2).await
     }
 
     async fn open_write(&self, node: NodeId) -> Result<WriteHandle> {
@@ -232,6 +214,7 @@ impl VfsEngine for SyncEngine {
 
     async fn remove_account(&self, acct: Uuid) -> Result<()> {
         self.clients.lock().remove(&acct);
+        self.root_drive_ids.lock().remove(&acct);
         if let Some(tx) = self.events.lock().as_ref() {
             let _ = tx.try_send(EngineEvent::AccountRemoved(acct));
         }

@@ -56,6 +56,7 @@ pub(crate) struct TokenResponse {
     pub(crate) refresh_token: Option<String>,
     pub(crate) expires_in: Option<u64>,
     pub(crate) error: Option<String>,
+    pub(crate) error_description: Option<String>,
 }
 
 pub(crate) fn scope_for_access(read_only: bool) -> &'static str {
@@ -85,7 +86,11 @@ pub(crate) async fn post_token_form(
         return Err(AuthError::InvalidGrant);
     }
     if let Some(err) = body.error {
-        return Err(AuthError::OAuth(err));
+        let detail = match body.error_description {
+            Some(d) if !d.trim().is_empty() => format!("{err}: {d}"),
+            _ => err,
+        };
+        return Err(AuthError::OAuth(detail));
     }
     Ok(body)
 }
@@ -191,5 +196,70 @@ impl AuthClient {
         .await?;
         body.access_token
             .ok_or_else(|| AuthError::OAuth("missing access_token".into()))
+    }
+}
+
+/// Returns true when Google rejected the configured OAuth client credentials.
+pub fn is_credential_rejection_error(msg: &str) -> bool {
+    let lower = msg.to_ascii_lowercase();
+    lower.contains("invalid_client") || lower.contains("unauthorized_client")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_credential_rejection_error;
+
+    #[test]
+    fn detects_oauth_client_credential_rejections_case_insensitively() {
+        assert!(is_credential_rejection_error(
+            "oauth failed: invalid_client: Unauthorized"
+        ));
+        assert!(is_credential_rejection_error("UNAUTHORIZED_CLIENT"));
+        assert!(!is_credential_rejection_error("invalid_grant"));
+        let c = super::AuthClient::new("cid".into(), "sec".into());
+        assert!(c
+            .authorization_url("http://127.0.0.1/cb", "ch", "st", true)
+            .contains("drive.readonly"));
+    }
+
+    #[tokio::test]
+    async fn token_exchange_and_refresh_error_paths() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let bad =
+            super::AuthClient::with_endpoints("c".into(), "s".into(), super::AUTH_URL, "bad-url");
+        assert!(bad.refresh("rt").await.is_err());
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        let srv = tokio::spawn(async move {
+            for body in [
+                "not-json",
+                r#"{"error":"denied"}"#,
+                "{}",
+                r#"{"access_token":"a"}"#,
+                "{}",
+            ] {
+                let (mut s, _) = l.accept().await.unwrap();
+                let mut b = [0u8; 512];
+                let _ = s.read(&mut b).await;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = s.write_all(resp.as_bytes()).await;
+            }
+        });
+        let cli = super::AuthClient::with_endpoints(
+            "c".into(),
+            "s".into(),
+            super::AUTH_URL,
+            format!("http://{addr}/tok"),
+        );
+        assert!(cli.refresh("rt").await.is_err());
+        assert!(cli.refresh("rt").await.is_err());
+        assert!(cli.exchange_code("c", "v", "u").await.is_err());
+        assert!(cli.exchange_code("c", "v", "u").await.is_err());
+        assert!(cli.refresh("rt").await.is_err());
+        let _ = srv.await;
     }
 }

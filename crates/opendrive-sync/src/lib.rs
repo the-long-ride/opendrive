@@ -10,11 +10,20 @@
 mod conflict;
 mod engine;
 mod evict;
+mod file_copy;
+mod file_ops;
+mod hydrate;
 mod limiter;
+mod path_time;
 mod poller;
 mod queue;
+mod replica_clear;
+mod replica_ops;
+mod replica_upload;
 mod shutdown;
 mod staging;
+mod stream_cache;
+mod stream_store;
 mod vfs_impl;
 mod worker;
 
@@ -22,7 +31,10 @@ pub use conflict::{hostname_fallback, materialize_conflict_sibling, revision_con
 pub use engine::{SyncEngine, SHARED_WITH_ME_DRIVE_ID};
 pub use limiter::BandwidthLimiter;
 pub use queue::{conflict_name, QueueEntry, UploadOp};
+pub use replica_clear::is_reparse_point;
+pub use replica_ops::SyncSummary;
 pub use staging::{StagingDir, StagingError};
+pub use stream_cache::{StreamCache, STREAM_CHUNK_BYTES};
 
 use async_trait::async_trait;
 use bytes::Bytes;

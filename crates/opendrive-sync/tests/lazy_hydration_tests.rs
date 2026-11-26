@@ -8,8 +8,7 @@ use std::ffi::OsStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[tokio::test]
-async fn list_lazily_hydrates_placeholder_subfolder_and_marks_cached() {
+async fn start_drive() -> (Arc<FakeDrive>, DriveClient, tokio::task::JoinHandle<()>) {
     let drive = Arc::new(FakeDrive::new());
     let (addr, handle) = FakeDriveServer::start(Arc::clone(&drive)).await;
     let client = DriveClient::with_base_urls(
@@ -17,6 +16,12 @@ async fn list_lazily_hydrates_placeholder_subfolder_and_marks_cached() {
         format!("http://{addr}/drive/v3"),
         format!("http://{addr}/upload/drive/v3"),
     );
+    (drive, client, handle)
+}
+
+#[tokio::test]
+async fn list_lazily_hydrates_placeholder_subfolder_and_marks_cached() {
+    let (drive, client, handle) = start_drive().await;
 
     drive.add_file(FakeFile {
         id: "folder-sub".into(),
@@ -82,13 +87,7 @@ async fn list_lazily_hydrates_placeholder_subfolder_and_marks_cached() {
 
 #[tokio::test]
 async fn shared_with_me_shortcuts_and_offline_placeholder_errors() {
-    let drive = Arc::new(FakeDrive::new());
-    let (addr, handle) = FakeDriveServer::start(Arc::clone(&drive)).await;
-    let client = DriveClient::with_base_urls(
-        "tok".into(),
-        format!("http://{addr}/drive/v3"),
-        format!("http://{addr}/upload/drive/v3"),
-    );
+    let (drive, client, handle) = start_drive().await;
 
     // Shortcut inside My Drive pointing to a shared folder.
     drive.add_file(FakeFile {
@@ -228,5 +227,74 @@ async fn shared_with_me_shortcuts_and_offline_placeholder_errors() {
     assert_eq!(novel_page.entries.len(), 1);
     assert_eq!(novel_page.entries[0].name, "chapter1.mp3");
 
+    handle.abort();
+}
+
+#[tokio::test]
+async fn shared_with_me_survives_poll_changes_and_repairs_orphaned_cached_state() {
+    let (drive, client, handle) = start_drive().await;
+    let fdir = "application/vnd.google-apps.folder";
+    drive.add_file(FakeFile {
+        id: "swm-folder".into(),
+        name: "Shared Novels".into(),
+        mime_type: fdir.into(),
+        parents: vec!["external-owner-root".into()],
+        head_revision_id: Some("rev-1".into()),
+        ..Default::default()
+    });
+    drive.mark_shared_with_me("swm-folder");
+
+    let engine = SyncEngine::new(Store::open_in_memory().unwrap());
+    let acct = Uuid::new_v4();
+    engine.set_drive_client(acct, client);
+    let root = engine.seed_root_account(acct, "Root").unwrap();
+    engine.hydrate_folder(acct, root).await.unwrap();
+    let swm_id = engine
+        .lookup(root, OsStr::new("Shared with me"))
+        .await
+        .unwrap()
+        .unwrap()
+        .id;
+
+    let first = engine
+        .list_explorer_nodes(acct, swm_id, false)
+        .await
+        .unwrap();
+    assert!(first.len() == 1 && first[0].display_name == "Shared Novels");
+
+    assert_eq!(engine.poll_changes(acct).await.unwrap(), 0);
+    drive.update_metadata("swm-folder", Some("Shared Novels"), None, None);
+    assert!(engine.poll_changes(acct).await.unwrap() >= 1);
+    let after = engine
+        .list_explorer_nodes(acct, swm_id, false)
+        .await
+        .unwrap();
+    assert!(after.iter().any(|n| n.display_name == "Shared Novels"));
+
+    {
+        let st = engine.store().lock();
+        let mut swm_child = st.find_by_drive_id(acct, "swm-folder").unwrap().unwrap();
+        swm_child.parent_id = None;
+        st.upsert_node(&swm_child).unwrap();
+    }
+    let repaired = engine.list(swm_id, None).await.unwrap();
+    assert_eq!(repaired.entries.len(), 1);
+    assert_eq!(repaired.entries[0].name, "Shared Novels");
+
+    drive.add_file(FakeFile {
+        id: "new-share".into(),
+        name: "shared.zip".into(),
+        mime_type: "application/zip".into(),
+        size: 12,
+        content: vec![3; 12],
+        head_revision_id: Some("rev-1".into()),
+        ..Default::default()
+    });
+    drive.mark_shared_with_me("new-share");
+    let refreshed = engine
+        .list_explorer_nodes(acct, swm_id, false)
+        .await
+        .unwrap();
+    assert!(refreshed.iter().any(|n| n.display_name == "shared.zip"));
     handle.abort();
 }

@@ -77,6 +77,8 @@ fn dispatch(
             let q = req.query.get("q").map(|s| s.as_str()).unwrap_or("");
             let items = if q.contains("sharedWithMe = true") {
                 drive.list_shared_with_me()
+            } else if q.contains("not 'root' in parents") {
+                drive.list_not_in_root()
             } else {
                 let parent = extract_parent_from_q(q).unwrap_or("root");
                 drive.list_children(parent)
@@ -105,7 +107,7 @@ fn dispatch(
                     json!({
                         "fileId": c.file_id,
                         "removed": c.removed,
-                        "file": c.file.map(|f| f.to_json()),
+                        "file": c.file.map(|f| drive.file_to_json(&f)),
                     })
                 })
                 .collect();
@@ -163,13 +165,41 @@ fn dispatch(
                 }
                 return (200, "application/octet-stream", vec![], f.content);
             }
-            json_ok(f.to_json())
+            let mut json = drive.file_to_json(&f);
+            if id == "root" {
+                if let Some(real) = drive.root_real_id() {
+                    json["id"] = Value::String(real);
+                }
+            }
+            json_ok(json)
+        }
+        ("POST", p) if p.starts_with("/drive/v3/files/") && p.ends_with("/copy") => {
+            let id = &p["/drive/v3/files/".len()..p.len() - "/copy".len()];
+            let v: Value = serde_json::from_slice(&req.body).unwrap_or_default();
+            let name = v.get("name").and_then(|x| x.as_str());
+            let parents = v.get("parents").and_then(|x| x.as_array()).map(|arr| {
+                arr.iter()
+                    .filter_map(|i| i.as_str().map(str::to_string))
+                    .collect()
+            });
+            match drive.copy_file(id, name, parents) {
+                Some(f) => json_ok(drive.file_to_json(&f)),
+                None => (404, "application/json", vec![], b"{}".to_vec()),
+            }
         }
         ("PATCH", p) if p.starts_with("/drive/v3/files/") => {
             let id = &p["/drive/v3/files/".len()..];
             let v: Value = serde_json::from_slice(&req.body).unwrap_or_default();
             let name = v.get("name").and_then(|x| x.as_str());
             let trashed = v.get("trashed").and_then(|x| x.as_bool());
+            let add_p = req.query.get("addParents").map(String::as_str);
+            let rm_p = req.query.get("removeParents").map(String::as_str);
+            if add_p.is_some() || rm_p.is_some() {
+                return match drive.patch_parents(id, add_p, rm_p, name) {
+                    Some(f) => json_ok(drive.file_to_json(&f)),
+                    None => (404, "application/json", vec![], b"{}".to_vec()),
+                };
+            }
             let parents = v.get("parents").and_then(|x| x.as_array()).map(|arr| {
                 arr.iter()
                     .filter_map(|i| i.as_str().map(str::to_string))
@@ -178,13 +208,13 @@ fn dispatch(
             if trashed == Some(true) && name.is_none() && parents.is_none() {
                 if drive.trash(id) {
                     if let Some(f) = drive.get_file(id) {
-                        return json_ok(f.to_json());
+                        return json_ok(drive.file_to_json(&f));
                     }
                 }
                 return (404, "application/json", vec![], b"{}".to_vec());
             }
             match drive.update_metadata(id, name, trashed, parents) {
-                Some(f) => json_ok(f.to_json()),
+                Some(f) => json_ok(drive.file_to_json(&f)),
                 None => (404, "application/json", vec![], b"{}".to_vec()),
             }
         }

@@ -160,3 +160,51 @@ fn cache_eviction_respects_safety_invariant_3() {
     assert!(store.get_cache_path(2).unwrap().is_none());
     assert_eq!(store.cache_bytes_total().unwrap(), 1300);
 }
+
+#[test]
+fn sorted_children_account_cache_bytes_and_account_upload_queue() {
+    let store = Store::open_in_memory().unwrap();
+    let acct1 = Uuid::new_v4();
+    let acct2 = Uuid::new_v4();
+
+    let mut folder = sample_node(1, acct1, "f1", "zeta", Some(0));
+    folder.kind = "folder".into();
+    let file_b = sample_node(2, acct1, "f2", "Beta.txt", Some(0));
+    let file_a = sample_node(3, acct1, "f3", "alpha.txt", Some(0));
+    let other_acct = sample_node(4, acct2, "f4", "other.bin", Some(0));
+    for n in [&folder, &file_b, &file_a, &other_acct] {
+        store.upsert_node(n).unwrap();
+    }
+
+    let sorted = store.list_children_sorted(0).unwrap();
+    let names: Vec<_> = sorted.iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, vec!["zeta", "alpha.txt", "Beta.txt", "other.bin"]);
+
+    store.set_cache_entry(2, "/c/2", 250, false).unwrap();
+    store.set_cache_entry(4, "/c/4", 900, false).unwrap();
+    assert_eq!(store.cache_bytes_total().unwrap(), 1150);
+
+    assert!(store
+        .update_node_state(2, NodeState::Cached, Some(true))
+        .unwrap());
+    assert!(!store
+        .update_node_state(999, NodeState::Cached, None)
+        .unwrap());
+    let n2 = store.get_node(2).unwrap().unwrap();
+    assert_eq!(n2.state, NodeState::Cached);
+    assert!(n2.pinned);
+
+    store.clear_node_cache_state(2).unwrap();
+    assert!(store.get_cache_path(2).unwrap().is_none());
+    let n2_cleared = store.get_node(2).unwrap().unwrap();
+    assert_eq!(n2_cleared.state, NodeState::Placeholder);
+    assert!(!n2_cleared.pinned);
+
+    store.enqueue_upload(4, "create", None).unwrap();
+    store.enqueue_upload(2, "update", None).unwrap();
+    let u1 = store.next_upload_for_account(acct1).unwrap().unwrap();
+    assert_eq!(u1.node_id, 2);
+    assert_eq!(store.mark_node_uploads_done(2).unwrap(), 1);
+    assert!(store.next_upload_for_account(acct1).unwrap().is_none());
+    assert!(store.next_upload_for_account(acct2).unwrap().is_some());
+}
