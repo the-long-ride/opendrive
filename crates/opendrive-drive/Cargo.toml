@@ -14,5 +14,5 @@ bytes = { workspace = true }
 reqwest = { workspace = true }
 
 [dev-dependencies]
-opendrive-fake-drive = { path = "../opendrive-fake-drive", version = "0.1.0" }
+opendrive-fake-drive = { path = "../opendrive-fake-drive", version = "0.2.0" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
