@@ -69,12 +69,12 @@ impl Bridge {
 
     pub fn credentials_for_account(&self, account_id: Option<Uuid>) -> (String, String) {
         if let Some(id) = account_id {
-            let (cred, sibling_ids) = {
+            let (is_sa, cred, sibling_ids) = {
                 let g = self.ctrl.lock().expect("controller lock");
-                let cred = g
-                    .accounts
-                    .get_account(id)
-                    .ok()
+                let acct = g.accounts.get_account(id).ok();
+                let is_sa = acct.is_some_and(|a| a.credential_set_id.is_nil());
+                let cred = acct
+                    .filter(|a| !a.credential_set_id.is_nil())
                     .and_then(|a| g.accounts.get_credential(a.credential_set_id).ok().cloned());
                 let siblings = match &cred {
                     Some(c) if !c.client_id.trim().is_empty() => g
@@ -86,8 +86,11 @@ impl Bridge {
                         .collect::<Vec<_>>(),
                     _ => Vec::new(),
                 };
-                (cred, siblings)
+                (is_sa, cred, siblings)
             };
+            if is_sa {
+                return (String::new(), String::new());
+            }
             if let Some(c) = cred {
                 let mut secret = load_secret_logged(&self.secrets, c.id);
                 if secret.trim().is_empty() {
@@ -101,6 +104,14 @@ impl Bridge {
             }
         }
         self.saved_oauth_credentials()
+    }
+
+    pub fn load_service_account_json(&self, account_id: Uuid) -> Option<String> {
+        self.secrets
+            .load_service_account_json(account_id)
+            .ok()
+            .flatten()
+            .filter(|s| !s.trim().is_empty())
     }
 
     pub fn save_oauth_client_credentials(
@@ -154,6 +165,10 @@ impl Bridge {
                     if !about.email.is_empty() {
                         existing.email = about.email.clone();
                     }
+                    if !new_account.nickname.trim().is_empty() {
+                        existing.nickname = new_account.nickname.clone();
+                    }
+                    existing.read_only = new_account.read_only;
                     existing.status = AccountStatus::Connected;
                     existing.enabled = true;
                     existing.storage_used = about.storage_used;
@@ -195,20 +210,47 @@ impl Bridge {
         Ok((account_id, root_id, message))
     }
 
-    fn cache_avatar_if_present(
+    async fn cache_avatar_if_present(
         &self,
         drive: &DriveClient,
         account_id: Uuid,
         photo_url: Option<&str>,
     ) {
-        if let (Some(dir), Ok(rt)) = (&self.data_dir, tokio::runtime::Handle::try_current()) {
-            let _ = rt.block_on(crate::design::avatars::cache_account_avatar(
-                drive, dir, account_id, photo_url,
-            ));
+        if let Some(dir) = &self.data_dir {
+            let _ = crate::design::avatars::cache_account_avatar(drive, dir, account_id, photo_url)
+                .await;
         }
     }
 
-    pub(super) fn complete_oauth_account(
+    async fn complete_resolved_account(
+        &self,
+        target_account_id: Option<Uuid>,
+        account_id: Uuid,
+        cred_id: Uuid,
+        (nick, folder, read_only): (&str, &str, bool),
+        about: &About,
+        drive: DriveClient,
+    ) -> Result<(Uuid, u64, String), String> {
+        let (nickname, folder_name) = resolve_account_names(about, nick, folder);
+        let account = Account {
+            id: account_id,
+            nickname,
+            email: about.email.clone(),
+            credential_set_id: cred_id,
+            folder_name,
+            read_only,
+            enabled: true,
+            status: AccountStatus::Connected,
+            storage_used: about.storage_used,
+            storage_quota: about.storage_quota,
+            avatar_url: about.photo_url.clone(),
+        };
+        self.cache_avatar_if_present(&drive, account_id, about.photo_url.as_deref())
+            .await;
+        self.finish_or_update_account(target_account_id, account, about, drive)
+    }
+
+    pub(super) async fn complete_oauth_account(
         &self,
         params: &OAuthStartParams,
         refresh_token: &str,
@@ -221,27 +263,13 @@ impl Bridge {
         self.secrets
             .store_refresh_token(account_id, refresh_token)
             .map_err(|e| format!("Failed to save refresh token in OS keyring: {e}"))?;
-
-        let (nickname, folder_name) =
-            resolve_account_names(about, &params.nickname, &params.folder_name);
-        let account = Account {
-            id: account_id,
-            nickname,
-            email: about.email.clone(),
-            credential_set_id: cred_id,
-            folder_name,
-            read_only: params.read_only,
-            enabled: true,
-            status: AccountStatus::Connected,
-            storage_used: about.storage_used,
-            storage_quota: about.storage_quota,
-            avatar_url: about.photo_url.clone(),
-        };
-        self.cache_avatar_if_present(&drive, account_id, about.photo_url.as_deref());
-        self.finish_or_update_account(params.target_account_id, account, about, drive)
+        let meta = (&*params.nickname, &*params.folder_name, params.read_only);
+        let target = params.target_account_id;
+        self.complete_resolved_account(target, account_id, cred_id, meta, about, drive)
+            .await
     }
 
-    pub(super) fn complete_service_account(
+    pub(super) async fn complete_service_account(
         &self,
         params: &ServiceAccountParams,
         raw_json: &str,
@@ -252,22 +280,9 @@ impl Bridge {
         self.secrets
             .store_service_account_json(account_id, raw_json)
             .map_err(|e| e.to_string())?;
-        let (nickname, folder_name) =
-            resolve_account_names(about, &params.nickname, &params.folder_name);
-        let account = Account {
-            id: account_id,
-            nickname,
-            email: about.email.clone(),
-            credential_set_id: Uuid::nil(),
-            folder_name,
-            read_only: params.read_only,
-            enabled: true,
-            status: AccountStatus::Connected,
-            storage_used: about.storage_used,
-            storage_quota: about.storage_quota,
-            avatar_url: about.photo_url.clone(),
-        };
-        self.cache_avatar_if_present(&drive, account_id, about.photo_url.as_deref());
-        self.finish_or_update_account(params.target_account_id, account, about, drive)
+        let meta = (&*params.nickname, &*params.folder_name, params.read_only);
+        let target = params.target_account_id;
+        self.complete_resolved_account(target, account_id, Uuid::nil(), meta, about, drive)
+            .await
     }
 }

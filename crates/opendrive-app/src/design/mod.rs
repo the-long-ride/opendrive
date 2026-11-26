@@ -3,7 +3,10 @@
 pub mod avatars;
 pub mod formatters;
 pub mod icons;
+pub mod icons_media;
 pub mod logo;
 pub mod theme;
+pub mod tooltip;
 pub mod widgets;
+pub mod widgets_badges;
 pub mod widgets_controls;

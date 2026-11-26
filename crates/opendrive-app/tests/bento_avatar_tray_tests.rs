@@ -51,20 +51,18 @@ fn tiny_png_bytes() -> Vec<u8> {
 #[test]
 fn total_storage_summary_and_logo_rgba_work() {
     let empty = summarize_total_storage(&[]);
-    assert_eq!(empty.badge_text, "0 B used");
-    assert_eq!(empty.ratio, 0.0);
+    assert!(!empty.has_exact_total && empty.badge_text == "0 B used" && empty.ratio == 0.0);
 
     let no_quota = summarize_total_storage(&[make_acct(2 * GIB, 0)]);
-    assert_eq!(no_quota.badge_text, "2.0 GB used");
-    assert_eq!(no_quota.ratio, 0.0);
+    assert!(!no_quota.has_exact_total && no_quota.badge_text == "2.0 GB used");
+
+    let mixed = summarize_total_storage(&[make_acct(3 * GIB, 10 * GIB), make_acct(2 * GIB, 0)]);
+    assert!(!mixed.has_exact_total && mixed.quota == 0 && mixed.badge_text == "5.0 GB used");
 
     let multi =
         summarize_total_storage(&[make_acct(3 * GIB, 10 * GIB), make_acct(2 * GIB, 10 * GIB)]);
-    assert_eq!(multi.used, 5 * GIB);
-    assert_eq!(multi.quota, 20 * GIB);
-    assert_eq!(multi.badge_text, "5.0 GB / 20 GB");
-    assert!(multi.detail_text.contains("2 accounts"));
-    assert!((multi.ratio - 0.25).abs() < 0.001);
+    assert!(multi.has_exact_total && multi.used == 5 * GIB && multi.quota == 20 * GIB);
+    assert!(multi.badge_text == "5.0 GB / 20 GB" && (multi.ratio - 0.25).abs() < 0.001);
 
     let rgba = render_logo_rgba(32);
     assert_eq!(rgba.len(), 32 * 32 * 4);
@@ -206,21 +204,15 @@ fn primary_and_dock_pill_button_text_color_never_matches_dark_background() {
             ..Default::default()
         };
         let mut out = ctx.run_ui(raw, |ui| {
+            let p = ButtonVariant::Primary;
+            let d = ButtonVariant::TactilePill;
+            let _ = pill_button(ui, &pal, Some(IconKind::Plus), "Connect", p, false, true);
             let _ = pill_button(
                 ui,
                 &pal,
-                Some(IconKind::Plus),
-                "Connect Account",
-                ButtonVariant::Primary,
-                false,
-                true,
-            );
-            let _ = pill_button(
-                ui,
-                &pal,
-                Some(IconKind::Sun),
+                Some(IconKind::ThemeColor),
                 "Light",
-                ButtonVariant::TactilePill,
+                d,
                 false,
                 true,
             );

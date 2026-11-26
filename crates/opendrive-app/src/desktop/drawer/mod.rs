@@ -6,11 +6,11 @@ pub(crate) use self::sections::render_oauth_pending;
 use self::sections::{render_browser_oauth_body, render_service_account_body};
 use crate::design::formatters::{ConnectAuthMode, NewAccountDraft};
 use crate::design::theme::ThemePalette;
-use crate::design::widgets::{pill_button, ButtonVariant, IconKind};
+use crate::design::widgets::{pill_button, singleline_input, ButtonVariant, IconKind};
 use crate::design::widgets_controls::setting_switch_row;
 use crate::desktop::UiAction;
 use crate::runtime::auth_runner::AuthSession;
-use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke, TextEdit};
+use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
 
 pub(super) fn drawer_field(
     ui: &mut egui::Ui,
@@ -21,7 +21,7 @@ pub(super) fn drawer_field(
 ) {
     ui.label(RichText::new(label).size(12.5).color(pal.text_muted));
     let w = ui.available_width();
-    ui.add_sized([w, 32.0], TextEdit::singleline(value).hint_text(hint));
+    ui.add_sized([w, 32.0], singleline_input(value, hint));
 }
 
 pub(super) fn render_optional_fields(

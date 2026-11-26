@@ -1,6 +1,9 @@
-//! Minimalist 1.5px stroke geometric vector iconography painted onto egui surfaces.
+//! Geometric vector iconography painted onto egui surfaces.
 
+use crate::design::logo::{CYAN, INDIGO, PINK};
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
+
+const THEME_DOTS: [(f32, f32); 3] = [(10.0, 5.8), (5.6, 13.5), (14.4, 13.5)];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconKind {
@@ -17,8 +20,8 @@ pub enum IconKind {
     Check,
     Alert,
     Refresh,
-    Sun,
-    Moon,
+    ThemeColor,
+    ThemeMono,
     Copy,
     External,
     Key,
@@ -29,20 +32,42 @@ pub enum IconKind {
     Edit,
     Heart,
     Star,
+    Explore,
+    ArrowLeft,
+    ChevronRight,
+    ChevronUp,
+    ChevronDown,
+    Search,
+    Grid,
+    List,
+    Cloud,
+    CloudDownload,
+    CloudUpload,
+    CloudClear,
+    DownloadCheck,
+    MoveRight,
+    Image,
+    Video,
+    Pdf,
+    Audio,
+    FileText,
+    DocSheet,
+    Monitor,
+    Link,
 }
 
-fn map_pt(rect: Rect, x: f32, y: f32) -> Pos2 {
+pub(crate) fn map_pt(rect: Rect, x: f32, y: f32) -> Pos2 {
     Pos2::new(
         rect.left() + (x / 20.0) * rect.width(),
         rect.top() + (y / 20.0) * rect.height(),
     )
 }
 
-fn seg(p: &egui::Painter, r: Rect, a: (f32, f32), b: (f32, f32), s: Stroke) {
+pub(crate) fn seg(p: &egui::Painter, r: Rect, a: (f32, f32), b: (f32, f32), s: Stroke) {
     p.line_segment([map_pt(r, a.0, a.1), map_pt(r, b.0, b.1)], s);
 }
 
-fn stroke_poly(
+pub(crate) fn stroke_poly(
     painter: &egui::Painter,
     rect: Rect,
     pts: &[(f32, f32)],
@@ -74,20 +99,17 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: IconKind, color: Co
                 seg(painter, rect, (10., 10.), pt, s);
             }
         }
-        IconKind::Folder => stroke_poly(
-            painter,
-            rect,
-            &[
+        IconKind::Folder => {
+            let pts = [
                 (2.5, 5.),
                 (8., 5.),
                 (10., 7.),
                 (17.5, 7.),
                 (17.5, 16.),
                 (2.5, 16.),
-            ],
-            true,
-            s,
-        ),
+            ];
+            stroke_poly(painter, rect, &pts, true, s);
+        }
         IconKind::Plus => {
             seg(painter, rect, (10., 4.5), (10., 15.5), s);
             seg(painter, rect, (4.5, 10.), (15.5, 10.), s);
@@ -98,8 +120,8 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: IconKind, color: Co
         }
         IconKind::Pause => {
             let bar = Stroke::new(2.0, color);
-            painter.line_segment([map_pt(rect, 6.8, 4.5), map_pt(rect, 6.8, 15.5)], bar);
-            painter.line_segment([map_pt(rect, 13.2, 4.5), map_pt(rect, 13.2, 15.5)], bar);
+            seg(painter, rect, (6.8, 4.5), (6.8, 15.5), bar);
+            seg(painter, rect, (13.2, 4.5), (13.2, 15.5), bar);
         }
         IconKind::Play => stroke_poly(painter, rect, &[(6., 4.5), (16., 10.), (6., 15.5)], true, s),
         IconKind::Lock | IconKind::Unlock => {
@@ -109,11 +131,16 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: IconKind, color: Co
                 &[(6.5, 9.), (6.5, 6.), (10., 4.2), (13.5, 5.8)]
             };
             stroke_poly(painter, rect, shackle, false, s);
-            let body = [(4.5, 9.), (15.5, 9.), (15.5, 16.5), (4.5, 16.5)];
-            stroke_poly(painter, rect, &body, true, s);
+            stroke_poly(
+                painter,
+                rect,
+                &[(4.5, 9.), (15.5, 9.), (15.5, 16.5), (4.5, 16.5)],
+                true,
+                s,
+            );
         }
         IconKind::Trash => {
-            painter.line_segment([map_pt(rect, 4., 6.), map_pt(rect, 16., 6.)], s);
+            seg(painter, rect, (4., 6.), (16., 6.), s);
             stroke_poly(
                 painter,
                 rect,
@@ -130,24 +157,22 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: IconKind, color: Co
             );
         }
         IconKind::Purge => {
-            painter.line_segment([map_pt(rect, 4., 15.5), map_pt(rect, 15.5, 4.)], s);
-            painter.line_segment([map_pt(rect, 4.5, 5.5), map_pt(rect, 7.5, 5.5)], s);
-            painter.line_segment([map_pt(rect, 6., 4.), map_pt(rect, 6., 7.)], s);
-            painter.line_segment([map_pt(rect, 12.5, 15.5), map_pt(rect, 15.5, 15.5)], s);
-            painter.line_segment([map_pt(rect, 14., 14.), map_pt(rect, 14., 17.)], s);
+            seg(painter, rect, (4., 15.5), (15.5, 4.), s);
+            seg(painter, rect, (4.5, 5.5), (7.5, 5.5), s);
+            seg(painter, rect, (6., 4.), (6., 7.), s);
+            seg(painter, rect, (12.5, 15.5), (15.5, 15.5), s);
+            seg(painter, rect, (14., 14.), (14., 17.), s);
         }
-        IconKind::Check => {
-            stroke_poly(
-                painter,
-                rect,
-                &[(4., 10.5), (8.5, 15.), (16.5, 5.5)],
-                false,
-                s,
-            );
-        }
+        IconKind::Check => stroke_poly(
+            painter,
+            rect,
+            &[(4., 10.5), (8.5, 15.), (16.5, 5.5)],
+            false,
+            s,
+        ),
         IconKind::Alert => {
             stroke_poly(painter, rect, &[(10., 3.5), (17., 16.), (3., 16.)], true, s);
-            painter.line_segment([map_pt(rect, 10., 8.5), map_pt(rect, 10., 12.)], s);
+            seg(painter, rect, (10., 8.5), (10., 12.), s);
             painter.circle_filled(map_pt(rect, 10., 14.), 1.0, color);
         }
         IconKind::Refresh => {
@@ -174,164 +199,68 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: IconKind, color: Co
                 s,
             );
         }
-        IconKind::Sun => {
-            painter.circle_stroke(map_pt(rect, 10., 10.), rect.width() * 0.175, s);
-            for step in 0..8 {
-                let a = (step as f32) * std::f32::consts::FRAC_PI_4;
-                let (sin, cos) = a.sin_cos();
-                let p1 = map_pt(rect, 10. + cos * 5.4, 10. + sin * 5.4);
-                let p2 = map_pt(rect, 10. + cos * 7.6, 10. + sin * 7.6);
-                painter.line_segment([p1, p2], s);
+        IconKind::ThemeColor => {
+            let radius = rect.width() * 0.165;
+            let rim = Stroke::new(1.25, color);
+            let alpha = color.a();
+            let fills = [INDIGO, PINK, CYAN]
+                .map(|[r, g, b, _]| Color32::from_rgba_unmultiplied(r, g, b, alpha));
+            for (pt, fill) in THEME_DOTS.into_iter().zip(fills) {
+                let center = map_pt(rect, pt.0, pt.1);
+                painter.circle_filled(center, radius, fill);
+                painter.circle_stroke(center, radius, rim);
             }
         }
-        IconKind::Moon => {
-            let cres = [
-                (12.2, 3.6),
-                (7.8, 5.2),
-                (5.2, 9.6),
-                (6.8, 14.4),
-                (11.6, 16.4),
-                (16.0, 14.4),
-                (11.8, 13.6),
-                (9.8, 10.0),
-                (11.6, 6.2),
-            ];
-            stroke_poly(painter, rect, &cres, true, s);
-        }
-        IconKind::Copy => {
-            stroke_poly(
-                painter,
-                rect,
-                &[(7., 3.5), (16.5, 3.5), (16.5, 13.5)],
-                false,
-                s,
-            );
-            stroke_poly(
-                painter,
-                rect,
-                &[(3.5, 6.5), (13.5, 6.5), (13.5, 16.5), (3.5, 16.5)],
-                true,
-                s,
-            );
-        }
-        IconKind::External => {
-            stroke_poly(
-                painter,
-                rect,
-                &[(10., 4.5), (4., 4.5), (4., 16.), (15.5, 16.), (15.5, 10.)],
-                false,
-                s,
-            );
-            stroke_poly(
-                painter,
-                rect,
-                &[(11.5, 3.5), (16.5, 3.5), (16.5, 8.5)],
-                false,
-                s,
-            );
-            painter.line_segment([map_pt(rect, 9.5, 10.5), map_pt(rect, 16.5, 3.5)], s);
-        }
-        IconKind::Key => {
-            painter.circle_stroke(map_pt(rect, 7.0, 10.0), rect.width() * 0.16, s);
-            painter.line_segment([map_pt(rect, 10.2, 10.0), map_pt(rect, 17.0, 10.0)], s);
-            painter.line_segment([map_pt(rect, 14.2, 10.0), map_pt(rect, 14.2, 13.0)], s);
-            painter.line_segment([map_pt(rect, 16.5, 10.0), map_pt(rect, 16.5, 12.5)], s);
+        IconKind::ThemeMono => {
+            let radius = rect.width() * 0.175;
+            for pt in THEME_DOTS {
+                painter.circle_filled(map_pt(rect, pt.0, pt.1), radius, color);
+            }
         }
         IconKind::Settings => {
-            painter.circle_stroke(map_pt(rect, 10., 10.), rect.width() * 0.16, s);
+            let gear_stroke = Stroke::new(1.35, color);
+            painter.circle_stroke(map_pt(rect, 10.0, 10.0), rect.width() * 0.135, gear_stroke);
+            let mut teeth = Vec::with_capacity(30);
             for step in 0..6 {
-                let a = (step as f32) * std::f32::consts::FRAC_PI_3;
-                let (sin, cos) = a.sin_cos();
-                painter.line_segment(
-                    [
-                        map_pt(rect, 10. + cos * 5.0, 10. + sin * 5.0),
-                        map_pt(rect, 10. + cos * 7.6, 10. + sin * 7.6),
-                    ],
-                    s,
-                );
+                let tooth_angle =
+                    -std::f32::consts::FRAC_PI_2 + (step as f32) * std::f32::consts::FRAC_PI_3;
+                for (angle_offset, radius) in [
+                    (-0.27, 5.5),
+                    (-0.17, 8.1),
+                    (0.17, 8.1),
+                    (0.27, 5.5),
+                    (std::f32::consts::FRAC_PI_6, 5.35),
+                ] {
+                    let (sin, cos) = (tooth_angle + angle_offset).sin_cos();
+                    teeth.push(map_pt(rect, 10.0 + cos * radius, 10.0 + sin * radius));
+                }
             }
+            painter.add(egui::Shape::closed_line(teeth, gear_stroke));
         }
-        IconKind::Minimize => {
-            painter.line_segment([map_pt(rect, 4.5, 14.5), map_pt(rect, 15.5, 14.5)], s);
-        }
-        IconKind::Maximize => {
+        IconKind::Monitor => {
             stroke_poly(
                 painter,
                 rect,
-                &[(4.5, 4.5), (15.5, 4.5), (15.5, 15.5), (4.5, 15.5)],
+                &[(3.0, 4.0), (17.0, 4.0), (17.0, 13.5), (3.0, 13.5)],
                 true,
                 s,
             );
+            seg(painter, rect, (10.0, 13.5), (10.0, 16.5), s);
+            seg(painter, rect, (6.5, 16.5), (13.5, 16.5), s);
         }
-        IconKind::Restore => {
-            stroke_poly(
-                painter,
-                rect,
-                &[(7.0, 4.0), (16.0, 4.0), (16.0, 13.0)],
-                false,
-                s,
-            );
-            stroke_poly(
-                painter,
-                rect,
-                &[(4.0, 7.0), (13.0, 7.0), (13.0, 16.0), (4.0, 16.0)],
-                true,
-                s,
-            );
+        IconKind::Link => {
+            let left_link = [(8.5, 7.), (5.5, 7.), (3.5, 10.), (5.5, 13.), (8.5, 13.)];
+            let right_link = [
+                (11.5, 7.),
+                (14.5, 7.),
+                (16.5, 10.),
+                (14.5, 13.),
+                (11.5, 13.),
+            ];
+            stroke_poly(painter, rect, &left_link, false, s);
+            stroke_poly(painter, rect, &right_link, false, s);
+            seg(painter, rect, (7.0, 10.0), (13.0, 10.0), s);
         }
-        IconKind::Edit => {
-            stroke_poly(
-                painter,
-                rect,
-                &[
-                    (4.0, 16.0),
-                    (4.5, 12.5),
-                    (13.5, 3.5),
-                    (16.5, 6.5),
-                    (7.5, 15.5),
-                ],
-                true,
-                s,
-            );
-            painter.line_segment([map_pt(rect, 11.5, 5.5), map_pt(rect, 14.5, 8.5)], s);
-        }
-        IconKind::Heart => {
-            stroke_poly(
-                painter,
-                rect,
-                &[
-                    (10.0, 16.5),
-                    (3.5, 10.5),
-                    (3.5, 6.5),
-                    (6.5, 4.0),
-                    (10.0, 6.5),
-                    (13.5, 4.0),
-                    (16.5, 6.5),
-                    (16.5, 10.5),
-                ],
-                true,
-                s,
-            );
-        }
-        IconKind::Star => {
-            stroke_poly(
-                painter,
-                rect,
-                &[
-                    (10.0, 3.0),
-                    (12.1, 7.3),
-                    (16.8, 8.0),
-                    (13.4, 11.3),
-                    (14.2, 16.0),
-                    (10.0, 13.8),
-                    (5.8, 16.0),
-                    (6.6, 11.3),
-                    (3.2, 8.0),
-                    (7.9, 7.3),
-                ],
-                true,
-                s,
-            );
-        }
+        other => crate::design::icons_media::paint_media_icon(painter, rect, other, s),
     }
 }

@@ -1,8 +1,7 @@
 use super::{ControlCenterApp, NoticeTone, UiAction, UiNotice};
-use crate::runtime::bridge_types::AliasEditDraft;
 use crate::shell::tray::apply_tray_event;
 use eframe::egui::{self, ViewportCommand};
-use opendrive_core::{default_account_alias, DocsMode, Settings};
+use opendrive_core::{DocsMode, Settings};
 use uuid::Uuid;
 
 impl ControlCenterApp {
@@ -16,9 +15,7 @@ impl ControlCenterApp {
     pub fn toggle_drawer(&mut self, force: Option<bool>) {
         self.drawer_open = force.unwrap_or(!self.drawer_open);
         self.form_error = None;
-        if !self.drawer_open {
-            self.reauth_account_id = None;
-        }
+        self.reauth_account_id = None;
     }
 
     pub fn toggle_settings(&mut self, force: Option<bool>) {
@@ -68,6 +65,14 @@ impl ControlCenterApp {
         self.notice_expires_at = None;
     }
     pub fn run_account_action(&mut self, action: &str, id: Option<&str>) {
+        let res = self.bridge.account_action(action, id);
+        if matches!(action, "move_up" | "move_down") {
+            match res {
+                Ok(next) => self.state = next,
+                Err(err) => self.set_err(err),
+            }
+            return;
+        }
         let ok_message = match action {
             "pause" => "Paused account sync",
             "resume" => "Resumed account sync",
@@ -77,10 +82,15 @@ impl ControlCenterApp {
             "resume_all" => "Resumed all accounts",
             _ => "Updated account",
         };
-        let res = self.bridge.account_action(action, id);
         let ok = res.is_ok();
         self.apply_result(res, ok_message);
         if ok {
+            if action == "remove" {
+                if let Some(rem) = id.and_then(|s| Uuid::parse_str(s.trim()).ok()) {
+                    self.explorer.sessions.remove(&rem);
+                    self.explorer.busy_accounts.remove(&rem);
+                }
+            }
             self.bridge.spawn_mount_sync(self.repaint_ctx.clone());
         }
     }
@@ -118,6 +128,31 @@ impl ControlCenterApp {
             DocsMode::ExportOffice => "Docs mode set to ExportOffice",
         };
         self.update_settings_with(msg, |s| s.docs_mode = mode);
+        self.clear_all_explorer_folder_caches();
+    }
+
+    pub fn toggle_explorer_folder_cache(&mut self) {
+        let next = !self.state.settings.explorer_folder_cache;
+        let res = self.bridge.update_explorer_folder_cache(next);
+        if res.is_ok() {
+            if next {
+                for (&aid, s) in &mut self.explorer.sessions {
+                    if s.loaded && !self.explorer.busy_accounts.contains_key(&aid) {
+                        if let Some((fid, _)) = s.breadcrumbs.last() {
+                            s.folder_cache.insert(*fid, s.entries.clone());
+                        }
+                    }
+                }
+            } else {
+                self.clear_all_explorer_folder_caches();
+            }
+        }
+        let msg = if next {
+            "Explorer folder path cache enabled"
+        } else {
+            "Explorer folder path cache disabled"
+        };
+        self.apply_result(res, msg);
     }
 
     pub fn toggle_autostart(&mut self) {
@@ -133,38 +168,32 @@ impl ControlCenterApp {
     pub fn toggle_virtual_drive(&mut self) {
         let next = !self.state.settings.virtual_drive_enabled;
         let msg = if next {
-            format!(
-                "Mounting virtual drive {}:\\...",
-                self.state.settings.virtual_drive_letter
-            )
+            "Showing OpenDrive in This PC..."
         } else {
-            "Unmounted virtual drive".into()
+            "Removed OpenDrive from This PC"
         };
         let res = self.bridge.update_virtual_drive(next);
         let ok = res.is_ok();
-        self.apply_result(res, &msg);
+        self.apply_result(res, msg);
         if ok {
             self.bridge.spawn_mount_sync(self.repaint_ctx.clone());
         }
     }
 
     pub fn open_mount_root(&mut self) {
-        let target = if self.state.settings.virtual_drive_enabled
-            && opendrive_platform::is_virtual_drive_supported()
-        {
-            format!("{}:\\", self.state.settings.virtual_drive_letter)
-        } else {
-            let dir = self.state.mount_root.clone();
-            let _ = std::fs::create_dir_all(&dir);
-            dir
-        };
-        if let Err(err) = (self.auth_endpoints.folder_opener)(&target) {
+        let dir = self.state.mount_root.clone();
+        let _ = std::fs::create_dir_all(&dir);
+        if let Err(err) = (self.auth_endpoints.folder_opener)(&dir) {
             self.set_err(format!("Failed to open folder: {err}"));
         }
     }
 
     pub fn purge_cache(&mut self) {
         self.apply_result(self.bridge.evict_cache(0), "Purged unpinned local cache");
+        self.clear_all_explorer_folder_caches();
+        if let Some((aid, fid)) = self.explorer.active_account_and_folder() {
+            self.sync_local_folder_entries(aid, fid);
+        }
     }
 
     pub(super) fn drain_tray_and_close(
@@ -182,46 +211,6 @@ impl ControlCenterApp {
         {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             actions.push(UiAction::WindowRequestClose);
-        }
-    }
-
-    pub(super) fn start_edit_alias(&mut self, id_str: &str) {
-        let Ok(id) = Uuid::parse_str(id_str.trim()) else {
-            return;
-        };
-        if let Some(acct) = self.state.accounts.iter().find(|a| a.id == id) {
-            self.alias_edit = Some(AliasEditDraft {
-                account_id: id,
-                nickname: default_account_alias(&acct.nickname, &acct.email),
-                rename_folder: false,
-            });
-        }
-    }
-
-    pub(super) fn save_edit_alias(&mut self) {
-        let Some(draft) = self.alias_edit.take() else {
-            return;
-        };
-        let folder = draft.rename_folder.then(|| draft.nickname.clone());
-        match self
-            .bridge
-            .rename_account(&draft.account_id.to_string(), draft.nickname, folder)
-        {
-            Ok((next, folder_changed)) => {
-                self.state = next;
-                self.set_ok("Saved account alias");
-                if folder_changed {
-                    self.bridge.spawn_mount_sync(self.repaint_ctx.clone());
-                }
-            }
-            Err(err) => self.set_err(err),
-        }
-    }
-
-    pub fn open_account_folder(&mut self, path: &str) {
-        let _ = std::fs::create_dir_all(path);
-        if let Err(err) = (self.auth_endpoints.folder_opener)(path) {
-            self.set_err(format!("Could not open folder: {err}"));
         }
     }
 
@@ -279,6 +268,7 @@ impl ControlCenterApp {
         match self.bridge.import_encrypted_vault(&bytes, &pw) {
             Ok((next, count)) => {
                 self.state = next;
+                self.clear_all_explorer_folder_caches();
                 self.vault_draft.password.clear();
                 self.vault_draft.confirm_password.clear();
                 self.avatar_attempted.clear();

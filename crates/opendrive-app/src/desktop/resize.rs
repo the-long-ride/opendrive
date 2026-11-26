@@ -92,12 +92,64 @@ impl ControlCenterApp {
             UiAction::WindowForceQuit => {
                 self.quit_requested = true;
                 self.hidden_to_tray = false;
+                self.shutdown_session();
                 let _ = self.bridge.handle_blocking(AppCommand::Quit);
                 if let Some(ctx) = &self.repaint_ctx {
                     ctx.send_viewport_cmd(ViewportCommand::Close);
                 }
             }
             _ => {}
+        }
+    }
+
+    pub(super) fn shutdown_session(&mut self) {
+        self.cancel_active_auth();
+        self.bridge.mounts().shutdown_all();
+    }
+
+    pub(super) fn sync_tray_summary(&mut self) {
+        let Some(updater) = &self.tray_summary_updater else {
+            return;
+        };
+        let text = crate::shell::tray::format_tray_summary(&self.state.accounts);
+        if text != self.last_tray_summary {
+            updater(&text);
+            self.last_tray_summary = text;
+        }
+    }
+
+    pub(super) fn handle_dropped_files(&mut self, ctx: &egui::Context) {
+        if !(self.drawer_open
+            && self.draft.auth_mode == crate::design::formatters::ConnectAuthMode::ServiceAccount)
+        {
+            return;
+        }
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if let Some(file) = dropped.first() {
+            let path = file.path();
+            if !path.as_os_str().is_empty() {
+                self.draft.service_account_input = path.display().to_string();
+                self.form_error = None;
+            } else if let Ok(bytes) = file.bytes() {
+                if let Ok(text) = std::str::from_utf8(&bytes) {
+                    self.draft.service_account_input = text.to_string();
+                    self.form_error = None;
+                }
+            }
+        }
+    }
+
+    pub(super) fn apply_result(
+        &mut self,
+        res: Result<crate::runtime::bridge::AppStateResponse, String>,
+        ok_message: &str,
+    ) {
+        match res {
+            Ok(next) => {
+                self.state = next;
+                self.set_ok(ok_message);
+            }
+            Err(err) => self.set_err(err),
         }
     }
 }

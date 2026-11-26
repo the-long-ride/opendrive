@@ -55,6 +55,9 @@ pub struct ThemePalette {
     pub warn_fg: Color32,
     pub warn_tint: Color32,
     pub warn_border: Color32,
+    pub cloud_fg: Color32,
+    pub cloud_tint: Color32,
+    pub cloud_border: Color32,
     pub pastel_green: Color32,
     pub pastel_orange: Color32,
     pub pastel_red: Color32,
@@ -64,8 +67,8 @@ pub fn palette(mode: ThemeMode) -> ThemePalette {
     match mode {
         ThemeMode::ColorPop => ThemePalette {
             is_dark: false,
-            canvas_bg: Color32::from_rgb(0x64, 0x5d, 0xf6),
-            backdrop_dot: Color32::from_rgb(0x88, 0x82, 0xfa),
+            canvas_bg: Color32::from_rgb(0xd6, 0xd4, 0xf0),
+            backdrop_dot: Color32::from_rgb(0xb6, 0xb3, 0xdc),
             card_bg: Color32::from_rgb(0xf8, 0xfa, 0xfc),
             card_alt: Color32::from_rgb(0xee, 0xf2, 0xfa),
             pill_neutral: Color32::from_rgb(0xff, 0xff, 0xff),
@@ -94,6 +97,9 @@ pub fn palette(mode: ThemeMode) -> ThemePalette {
             warn_fg: Color32::from_rgb(0xb4, 0x53, 0x09),
             warn_tint: Color32::from_rgb(0xfe, 0xf3, 0xc7),
             warn_border: Color32::from_rgb(0xb4, 0x53, 0x09),
+            cloud_fg: Color32::from_rgb(2, 132, 199),
+            cloud_tint: Color32::from_rgb(224, 242, 254),
+            cloud_border: Color32::from_rgb(2, 132, 199),
             pastel_green: Color32::from_rgb(0x6e, 0xe7, 0xb7),
             pastel_orange: Color32::from_rgb(0xfd, 0xba, 0x74),
             pastel_red: Color32::from_rgb(0xfc, 0xa5, 0xa5),
@@ -130,6 +136,9 @@ pub fn palette(mode: ThemeMode) -> ThemePalette {
             warn_fg: Color32::from_rgb(251, 191, 36),
             warn_tint: Color32::from_rgb(51, 39, 20),
             warn_border: Color32::from_rgb(94, 71, 32),
+            cloud_fg: Color32::from_rgb(56, 189, 248),
+            cloud_tint: Color32::from_rgb(15, 41, 66),
+            cloud_border: Color32::from_rgb(29, 78, 137),
             pastel_green: Color32::from_rgb(134, 239, 172),
             pastel_orange: Color32::from_rgb(253, 186, 116),
             pastel_red: Color32::from_rgb(252, 165, 165),
@@ -171,18 +180,12 @@ fn widget_style(
 }
 
 pub fn apply_studio_theme(ctx: &egui::Context, mode: ThemeMode) {
-    let egui_theme = match mode {
-        ThemeMode::ColorPop => Theme::Light,
-        ThemeMode::DarkStudio => Theme::Dark,
+    let (egui_theme, mut visuals) = match mode {
+        ThemeMode::ColorPop => (Theme::Light, Visuals::light()),
+        ThemeMode::DarkStudio => (Theme::Dark, Visuals::dark()),
     };
     ctx.set_theme(egui_theme);
     let pal = palette(mode);
-
-    let mut visuals = if pal.is_dark {
-        Visuals::dark()
-    } else {
-        Visuals::light()
-    };
     visuals.dark_mode = pal.is_dark;
     visuals.override_text_color = Some(pal.text_primary);
     visuals.weak_text_color = Some(pal.text_muted);
@@ -205,64 +208,89 @@ pub fn apply_studio_theme(ctx: &egui::Context, mode: ThemeMode) {
     visuals.text_cursor.stroke = Stroke::new(1.5, Color32::WHITE);
     visuals.interact_cursor = Some(CursorIcon::PointingHand);
 
-    visuals.widgets.noninteractive = widget_style(
+    let s = |bg, wbg, bd, fg| widget_style(bg, wbg, bd, fg, 8);
+    let w = &mut visuals.widgets;
+    w.noninteractive = s(
         pal.card_bg,
         pal.canvas_bg,
         pal.card_border,
         pal.text_primary,
-        8,
     );
-    visuals.widgets.inactive = widget_style(
+    w.inactive = s(
         pal.card_alt,
         pal.card_alt,
         pal.card_border,
         pal.text_primary,
-        8,
     );
-    visuals.widgets.hovered = widget_style(
+    w.hovered = s(
         pal.card_alt,
         pal.card_alt,
         pal.accent_blue,
         pal.text_primary,
-        8,
     );
-    visuals.widgets.active = widget_style(
+    w.active = s(
         pal.accent_blue_tint,
         pal.accent_blue_tint,
         pal.accent_blue,
         pal.accent_blue,
-        8,
     );
-    visuals.widgets.open = widget_style(
-        pal.card_alt,
-        pal.card_alt,
-        pal.accent_blue,
-        pal.text_primary,
-        8,
-    );
+    w.open = w.hovered;
 
     ctx.set_visuals_of(egui_theme, visuals.clone());
     ctx.set_visuals(visuals);
 
+    install_unicode_fallback_fonts(ctx);
     ctx.global_style_mut(|style| {
         style.spacing.item_spacing = egui::vec2(8.0, 8.0);
         style.spacing.button_padding = egui::vec2(12.0, 6.0);
         style.spacing.interact_size = egui::vec2(32.0, 32.0);
         style.spacing.scroll.bar_width = 8.0;
-        style
-            .text_styles
-            .insert(TextStyle::Body, FontId::proportional(14.0));
-        style
-            .text_styles
-            .insert(TextStyle::Button, FontId::proportional(13.0));
-        style
-            .text_styles
-            .insert(TextStyle::Monospace, FontId::monospace(12.5));
-        style
-            .text_styles
-            .insert(TextStyle::Heading, FontId::proportional(17.5));
-        style
-            .text_styles
-            .insert(TextStyle::Small, FontId::proportional(12.0));
+        for (st, id) in [
+            (TextStyle::Body, FontId::proportional(14.0)),
+            (TextStyle::Button, FontId::proportional(13.0)),
+            (TextStyle::Monospace, FontId::monospace(12.5)),
+            (TextStyle::Heading, FontId::proportional(17.5)),
+            (TextStyle::Small, FontId::proportional(12.0)),
+        ] {
+            style.text_styles.insert(st, id);
+        }
     });
+}
+
+fn install_unicode_fallback_fonts(ctx: &egui::Context) {
+    let id = egui::Id::unique("od_unicode_fonts");
+    if ctx.data_mut(|d| std::mem::replace(d.get_temp_mut_or_default::<bool>(id), true)) {
+        return;
+    }
+    static FONTS: std::sync::OnceLock<Vec<(&'static str, std::sync::Arc<egui::FontData>)>> =
+        std::sync::OnceLock::new();
+    let fonts = FONTS.get_or_init(|| {
+        let mut out = Vec::new();
+        let groups = [
+            ("od_lat", "C:\\Windows\\Fonts\\segoeui.ttf|/System/Library/Fonts/Supplemental/Arial Unicode.ttf|/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+            ("od_cjk", "C:\\Windows\\Fonts\\msyh.ttc|C:\\Windows\\Fonts\\malgun.ttf|/System/Library/Fonts/PingFang.ttc|/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        ];
+        for (k, ps) in groups {
+            if let Some(b) = ps.split('|').find_map(|p| std::fs::read(p).ok()) {
+                out.push((k, std::sync::Arc::new(egui::FontData::from_owned(b))));
+            }
+        }
+        out
+    });
+    if !fonts.is_empty() {
+        let mut defs = egui::FontDefinitions::default();
+        for (k, data) in fonts {
+            defs.font_data
+                .insert((*k).to_string(), std::sync::Arc::clone(data));
+            defs.families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .push((*k).to_string());
+            defs.families
+                .entry(egui::FontFamily::Monospace)
+                .or_default()
+                .push((*k).to_string());
+        }
+        ctx.set_fonts(defs);
+    }
 }

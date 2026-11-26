@@ -27,6 +27,7 @@ pub struct RecordingBackend {
     pub connected: Mutex<Vec<(Uuid, PathBuf, u64)>>,
     pub unregistered: Mutex<Vec<PathBuf>>,
     pub virtual_drives: Mutex<Vec<(bool, String, PathBuf)>>,
+    pub this_pc_namespaces: Mutex<Vec<(bool, PathBuf, Option<opendrive_platform::ExplorerQuota>)>>,
 }
 
 impl MountBackend for RecordingBackend {
@@ -62,6 +63,19 @@ impl MountBackend for RecordingBackend {
         opendrive_platform::normalize_drive_letter(letter)
             .map(|_| ())
             .map_err(|e| e.to_string())
+    }
+
+    fn sync_this_pc_namespace(
+        &self,
+        enabled: bool,
+        root: &Path,
+        quota: Option<opendrive_platform::ExplorerQuota>,
+    ) -> Result<(), String> {
+        self.this_pc_namespaces
+            .lock()
+            .unwrap()
+            .push((enabled, root.to_path_buf(), quota));
+        Ok(())
     }
 }
 

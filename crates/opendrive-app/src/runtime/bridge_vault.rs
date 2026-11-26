@@ -7,31 +7,45 @@ use opendrive_auth::{
     VaultPayload,
 };
 use opendrive_core::{
-    default_account_alias, sanitize_folder_segment, Account, AccountStatus, AppCommand,
-    CredentialSet,
+    default_account_alias, sanitize_folder_segment, save_settings, Account, AccountStatus,
+    AppCommand, CredentialSet, Settings,
 };
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 impl Bridge {
+    pub(crate) fn modify_settings(
+        &self,
+        mutate: impl FnOnce(&mut Settings),
+        after_update: impl FnOnce(&Settings) -> Result<(), String>,
+    ) -> Result<AppStateResponse, String> {
+        let next = {
+            let mut g = self.ctrl.lock().expect("controller lock");
+            let mut updated = g.settings.clone();
+            mutate(&mut updated);
+            g.handle(AppCommand::UpdateSettings(updated.clone()));
+            updated
+        };
+        after_update(&next)?;
+        if let Some(dir) = &self.config_dir {
+            save_settings(dir, &next).map_err(str_err)?;
+        }
+        Ok(self.state_snapshot())
+    }
+
     pub fn update_release_prefs(
         &self,
         check_updates: bool,
         ignored_release_version: Option<String>,
     ) -> Result<AppStateResponse, String> {
-        let next = {
-            let mut g = self.ctrl.lock().expect("controller lock");
-            let mut updated = g.settings.clone();
-            updated.check_updates = check_updates;
-            updated.ignored_release_version = ignored_release_version;
-            g.handle(AppCommand::UpdateSettings(updated.clone()));
-            updated
-        };
-        if let Some(dir) = &self.config_dir {
-            opendrive_core::save_settings(dir, &next).map_err(str_err)?;
-        }
-        Ok(self.state_snapshot())
+        self.modify_settings(
+            |s| {
+                s.check_updates = check_updates;
+                s.ignored_release_version = ignored_release_version;
+            },
+            |_| Ok(()),
+        )
     }
 
     pub fn rename_account(

@@ -147,8 +147,8 @@ fn headless_egui_renders_dark_light_viewports_controls_and_icons() {
         IconKind::Check,
         IconKind::Alert,
         IconKind::Refresh,
-        IconKind::Sun,
-        IconKind::Moon,
+        IconKind::ThemeColor,
+        IconKind::ThemeMono,
         IconKind::Copy,
         IconKind::External,
         IconKind::Key,
@@ -290,11 +290,7 @@ fn keyboard_zoom_and_tray_summary_updater_work() {
     send_key(Key::Equals);
     assert!(ctx.zoom_factor() > 1.05, "zoom={}", ctx.zoom_factor());
     send_key(Key::Minus);
-    assert!(
-        (ctx.zoom_factor() - 1.0).abs() < 0.05,
-        "zoom={}",
-        ctx.zoom_factor()
-    );
+    assert!((ctx.zoom_factor() - 1.0).abs() < 0.05);
     send_key(Key::Equals);
     send_key(Key::Num0);
     assert!((ctx.zoom_factor() - 1.0).abs() < 0.01);
