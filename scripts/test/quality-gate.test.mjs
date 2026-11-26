@@ -39,7 +39,7 @@ test('package.json defines required quality-gate scripts', () => {
   );
 });
 
-test('quality-gate workflow enforces Node 24, 90% coverage, Rust checks, and gate job', () => {
+test('quality-gate workflow enforces Node 24, 95% coverage, Rust checks, and gate job', () => {
   const workflow = read('.github/workflows/quality-gate.yml');
   assert.match(workflow, /actions\/checkout@v6/);
   assert.match(workflow, /actions\/setup-node@v6/);
@@ -58,12 +58,12 @@ test('quality-gate workflow enforces Node 24, 90% coverage, Rust checks, and gat
   for (const metric of ['--lines', '--statements', '--functions', '--branches']) {
     assert.ok(nodeCov.includes(metric), `missing ${metric} in test-coverage-node.mjs`);
   }
-  assert.match(nodeCov, /'90'/);
+  assert.match(nodeCov, /'95'/);
 
   const rustCov = read('scripts/test-coverage-rust.mjs');
-  assert.match(rustCov, /--fail-under-lines[\s\S]*90/);
-  assert.match(rustCov, /--fail-under-functions[\s\S]*90/);
-  assert.match(rustCov, /--fail-under-regions[\s\S]*90/);
+  assert.match(rustCov, /--fail-under-lines[\s\S]*95/);
+  assert.match(rustCov, /--fail-under-functions[\s\S]*95/);
+  assert.match(rustCov, /--fail-under-regions[\s\S]*95/);
 });
 
 test('toolchain, gitignore, prettierignore, launch.json, and knip config match policy', () => {
@@ -85,4 +85,9 @@ test('toolchain, gitignore, prettierignore, launch.json, and knip config match p
 
   const knip = JSON.parse(read('knip.json'));
   assert.deepEqual(knip.project, ['scripts/**/*.mjs']);
+
+  const locLint = read('scripts/loc-lint.mjs');
+  assert.doesNotMatch(locLint, /legacyCeilings|allowlist|overrides/i);
+  assert.match(locLint, /--others/);
+  assert.match(locLint, /--exclude-standard/);
 });
