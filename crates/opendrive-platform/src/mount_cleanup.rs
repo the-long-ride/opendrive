@@ -1,5 +1,9 @@
 //! OS Explorer refresh, detached watchdog spawning, and process-exit cleanup helpers.
 
+#[cfg(windows)]
+use core::ffi::c_void;
+#[cfg(windows)]
+use core::ptr::{null, null_mut};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 #[cfg(windows)]
@@ -9,32 +13,23 @@ use std::sync::{Arc, Mutex};
 #[cfg(windows)]
 #[link(name = "shell32")]
 extern "system" {
-    fn SHChangeNotify(
-        w_event_id: i32,
-        u_flags: u32,
-        dw_item1: *const core::ffi::c_void,
-        dw_item2: *const core::ffi::c_void,
-    );
-    fn SHGetSpecialFolderLocation(
-        hwnd_owner: isize,
-        n_folder: i32,
-        ppidl: *mut *mut core::ffi::c_void,
-    ) -> i32;
+    fn SHChangeNotify(event: i32, flags: u32, item1: *const c_void, item2: *const c_void);
+    fn SHGetSpecialFolderLocation(owner: isize, folder: i32, ppidl: *mut *mut c_void) -> i32;
     fn SHParseDisplayName(
-        psz_name: *const u16,
-        pbc: *mut core::ffi::c_void,
-        ppidl: *mut *mut core::ffi::c_void,
-        sfgao_in: u32,
-        psfgao_out: *mut u32,
+        name: *const u16,
+        pbc: *mut c_void,
+        ppidl: *mut *mut c_void,
+        in_flags: u32,
+        out_flags: *mut u32,
     ) -> i32;
 }
 
 #[cfg(windows)]
 #[link(name = "ole32")]
 extern "system" {
-    fn CoInitializeEx(pv_reserved: *const core::ffi::c_void, dw_coinit: u32) -> i32;
+    fn CoInitializeEx(reserved: *const c_void, coinit: u32) -> i32;
     fn CoUninitialize();
-    fn CoTaskMemFree(pv: *mut core::ffi::c_void);
+    fn CoTaskMemFree(pv: *mut c_void);
 }
 
 #[cfg(windows)]
@@ -43,26 +38,22 @@ extern "system" {
     fn SendMessageTimeoutW(
         hwnd: isize,
         msg: u32,
-        w_param: usize,
-        l_param: isize,
-        fu_flags: u32,
-        u_timeout: u32,
-        lpdw_result: *mut usize,
+        w: usize,
+        l: isize,
+        flags: u32,
+        timeout: u32,
+        res: *mut usize,
     ) -> isize;
 }
 
 #[cfg(windows)]
 #[link(name = "kernel32")]
 extern "system" {
-    fn OpenProcess(
-        dw_desired_access: u32,
-        b_inherit_handle: i32,
-        dw_process_id: u32,
-    ) -> *mut core::ffi::c_void;
-    fn WaitForSingleObject(h_handle: *mut core::ffi::c_void, dw_milliseconds: u32) -> u32;
-    fn CloseHandle(h_object: *mut core::ffi::c_void) -> i32;
+    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+    fn WaitForSingleObject(handle: *mut c_void, ms: u32) -> u32;
+    fn CloseHandle(handle: *mut c_void) -> i32;
     fn SetConsoleCtrlHandler(
-        handler_routine: Option<unsafe extern "system" fn(u32) -> i32>,
+        routine: Option<unsafe extern "system" fn(u32) -> i32>,
         add: i32,
     ) -> i32;
 }
@@ -134,57 +125,43 @@ pub fn spawn_detached_background(program: &Path, args: &[&str]) -> std::io::Resu
 }
 
 /// Captures Shell PIDLs for a removed namespace CLSID before deletion and notifies Explorer immediately afterward.
+#[cfg(windows)]
 pub(crate) fn remove_namespace_with_shell_notify<T>(
     clsid: &str,
     remove_op: impl FnOnce() -> T,
 ) -> T {
-    #[cfg(windows)]
-    {
-        struct ComGuard(bool);
-        impl Drop for ComGuard {
-            fn drop(&mut self) {
-                if self.0 {
-                    unsafe { CoUninitialize() };
-                }
+    struct ComGuard(bool);
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            if self.0 {
+                unsafe { CoUninitialize() };
             }
         }
-        let hr = unsafe { CoInitializeEx(core::ptr::null(), 0x2) };
-        let _com = ComGuard(hr == 0 || hr == 1);
-        let mut pidls = Vec::with_capacity(2);
-        for spec in [
-            format!("::{{20D04FE0-3AEA-1069-A2D8-08002B30309D}}\\::{clsid}"),
-            format!("::{clsid}"),
-        ] {
-            let wide: Vec<u16> = spec.encode_utf16().chain(Some(0)).collect();
-            let mut pidl: *mut core::ffi::c_void = core::ptr::null_mut();
-            let parsed = unsafe {
-                SHParseDisplayName(
-                    wide.as_ptr(),
-                    core::ptr::null_mut(),
-                    &mut pidl,
-                    0,
-                    core::ptr::null_mut(),
-                )
-            };
-            if parsed >= 0 && !pidl.is_null() {
-                pidls.push(pidl);
-            }
-        }
-        let out = remove_op();
-        for pidl in pidls {
-            unsafe {
-                SHChangeNotify(0x0000_0010, 0x1000, pidl, core::ptr::null());
-                SHChangeNotify(0x0000_0004, 0x1000, pidl, core::ptr::null());
-                CoTaskMemFree(pidl);
-            }
-        }
-        out
     }
-    #[cfg(not(windows))]
-    {
-        let _ = clsid;
-        remove_op()
+    let hr = unsafe { CoInitializeEx(null(), 0x2) };
+    let _com = ComGuard(hr == 0 || hr == 1);
+    let mut pidls = Vec::with_capacity(2);
+    for spec in [
+        format!("::{{20D04FE0-3AEA-1069-A2D8-08002B30309D}}\\::{clsid}"),
+        format!("::{clsid}"),
+    ] {
+        let wide: Vec<u16> = spec.encode_utf16().chain(Some(0)).collect();
+        let mut pidl: *mut c_void = null_mut();
+        let parsed =
+            unsafe { SHParseDisplayName(wide.as_ptr(), null_mut(), &mut pidl, 0, null_mut()) };
+        if parsed >= 0 && !pidl.is_null() {
+            pidls.push(pidl);
+        }
     }
+    let out = remove_op();
+    for pidl in pidls {
+        unsafe {
+            SHChangeNotify(0x0000_0010, 0x1000, pidl, null());
+            SHChangeNotify(0x0000_0004, 0x1000, pidl, null());
+            CoTaskMemFree(pidl);
+        }
+    }
+    out
 }
 
 /// Notifies Windows Explorer that virtual drives or `This PC` namespace entries changed without restarting `explorer.exe`.
@@ -192,13 +169,13 @@ pub fn notify_shell_mounts_changed() {
     #[cfg(windows)]
     unsafe {
         for csidl in [0x0011_i32, 0x0000_i32] {
-            let mut pidl: *mut core::ffi::c_void = core::ptr::null_mut();
+            let mut pidl: *mut c_void = null_mut();
             if SHGetSpecialFolderLocation(0, csidl, &mut pidl) >= 0 && !pidl.is_null() {
-                SHChangeNotify(0x0000_1000, 0x1000, pidl, core::ptr::null());
+                SHChangeNotify(0x0000_1000, 0x1000, pidl, null());
                 CoTaskMemFree(pidl);
             }
         }
-        SHChangeNotify(0x0800_0000, 0x1000, core::ptr::null(), core::ptr::null());
+        SHChangeNotify(0x0800_0000, 0x1000, null(), null());
         let shell_state: Vec<u16> = "ShellState\0".encode_utf16().collect();
         let mut msg_res = 0_usize;
         let _ = SendMessageTimeoutW(
@@ -211,6 +188,30 @@ pub fn notify_shell_mounts_changed() {
             &mut msg_res,
         );
     }
+}
+
+#[cfg(target_os = "linux")]
+fn is_zombie_unix(pid: u32) -> bool {
+    std::fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .and_then(|s| {
+            s.rsplit_once(')')
+                .map(|(_, r)| r.trim_start().starts_with(['Z', 'X', 'x']))
+        })
+        .unwrap_or(true)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn is_zombie_unix(pid: u32) -> bool {
+    Command::new("ps")
+        .args(["-o", "state=", "-p", &pid.to_string()])
+        .output()
+        .ok()
+        .is_some_and(|o| {
+            let s = String::from_utf8_lossy(&o.stdout);
+            let st = s.trim_start();
+            st.is_empty() || st.starts_with(['Z', 'X'])
+        })
 }
 
 /// Returns whether process `pid` is currently alive (cross-platform without requiring `/proc`).
@@ -235,7 +236,7 @@ pub fn is_process_alive(pid: u32) -> bool {
         extern "C" {
             fn kill(pid: i32, sig: i32) -> i32;
         }
-        pid <= i32::MAX as u32 && unsafe { kill(pid as i32, 0) == 0 }
+        pid <= i32::MAX as u32 && unsafe { kill(pid as i32, 0) == 0 } && !is_zombie_unix(pid)
     }
     #[cfg(not(any(windows, unix)))]
     {
@@ -243,7 +244,7 @@ pub fn is_process_alive(pid: u32) -> bool {
     }
 }
 
-/// Blocks until process `pid` exits (returns immediately if `pid` is invalid or already gone).
+/// Blocks until process `pid` exits (returns immediately if `pid` is invalid, exited, or already gone).
 pub fn wait_for_process_exit(pid: u32) {
     if pid == 0 {
         return;
@@ -261,39 +262,31 @@ pub fn wait_for_process_exit(pid: u32) {
     #[cfg(not(windows))]
     {
         while is_process_alive(pid) {
-            std::thread::sleep(std::time::Duration::from_millis(250));
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn shell_notify_and_zero_or_exited_pid_wait_are_safe() {
-        notify_shell_mounts_changed();
-        assert!(is_process_alive(std::process::id()));
-        assert!(!is_process_alive(0) && !is_process_alive(u32::MAX));
-        wait_for_process_exit(0);
-        wait_for_process_exit(u32::MAX);
+    fn windows_internal_namespace_notify_and_ctrl_handler_work() {
         assert_eq!(
             remove_namespace_with_shell_notify("{00000000-0000-0000-0000-000000000000}", || 42),
             42
         );
-        #[cfg(windows)]
-        {
-            let hits = Arc::new(AtomicUsize::new(0));
-            let cb = Arc::clone(&hits);
-            install_console_cleanup_handler(move || {
-                cb.fetch_add(1, Ordering::SeqCst);
-            });
-            unsafe {
-                assert_eq!((console_ctrl_handler(0), console_ctrl_handler(99)), (0, 0));
-            }
-            assert_eq!(hits.load(Ordering::SeqCst), 1);
-            *CONSOLE_CLEANUP_HOOK.lock().unwrap() = None;
+        let hits = Arc::new(AtomicUsize::new(0));
+        let cb = Arc::clone(&hits);
+        install_console_cleanup_handler(move || {
+            cb.fetch_add(1, Ordering::SeqCst);
+        });
+        unsafe {
+            assert_eq!((console_ctrl_handler(0), console_ctrl_handler(99)), (0, 0));
         }
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        *CONSOLE_CLEANUP_HOOK.lock().unwrap() = None;
     }
 }

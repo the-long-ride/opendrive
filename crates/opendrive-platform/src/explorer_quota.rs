@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 const FOLDER_SHORTCUT_CLSID: &str = "{0AFACED1-E828-11D1-9187-B532F1E9575D}";
+#[cfg(windows)]
 const OPENDRIVE_NAMESPACE_CLSID: &str = "{D84E7B21-6F4A-4D89-9C1E-5A2B3C4D5E6F}";
 const CLSID_KEY: &str = r"HKCU\Software\Classes\CLSID\{D84E7B21-6F4A-4D89-9C1E-5A2B3C4D5E6F}";
 const NAMESPACE_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\MyComputer\NameSpace\{D84E7B21-6F4A-4D89-9C1E-5A2B3C4D5E6F}";
@@ -190,13 +191,16 @@ pub fn sync_this_pc_namespace(
             )?;
         }
         crate::notify_shell_mounts_changed();
-        Ok(())
     }
     #[cfg(not(windows))]
     {
-        let _ = (enabled, target, icon_ico, quota);
-        Ok(())
+        let _ = (icon_ico, quota);
+        if enabled {
+            std::fs::create_dir_all(target)
+                .map_err(|e| PlatformError::Other(format!("create {}: {e}", target.display())))?;
+        }
     }
+    Ok(())
 }
 
 fn split_command_tokens(raw: &str) -> Result<Vec<String>> {
@@ -242,12 +246,8 @@ pub fn build_launch_invocation(app_command: &str, target: &str) -> Result<(Strin
     let mut substituted = false;
     let mut args = Vec::with_capacity(tokens.len() + 1);
     for arg in tokens {
-        if arg.contains("{target}") || arg.contains("{url}") {
-            substituted = true;
-            args.push(arg.replace("{target}", target).replace("{url}", target));
-        } else {
-            args.push(arg);
-        }
+        substituted |= arg.contains("{target}") || arg.contains("{url}");
+        args.push(arg.replace("{target}", target).replace("{url}", target));
     }
     if !substituted {
         args.push(target.to_string());

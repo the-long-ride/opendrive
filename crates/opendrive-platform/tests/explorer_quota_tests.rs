@@ -180,8 +180,8 @@ fn drive_mount_and_namespace_error_paths() {
     assert!(unmount_virtual_drive("C").is_err());
     assert!(unmount_virtual_drive("").is_err());
     assert!(unmount_virtual_drive_for_target("C", &dir).is_err());
-    #[cfg(windows)]
     assert!(sync_this_pc_namespace(true, &blocker.join("child"), None, None).is_err());
+    sync_this_pc_namespace(false, &dir, None, None).unwrap();
 
     assert_eq!(normalize_drive_letter("o").unwrap(), 'O');
     assert_eq!(normalize_drive_letter("  z:\\ ").unwrap(), 'Z');

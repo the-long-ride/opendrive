@@ -13,6 +13,7 @@ concurrency:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       node: ${{ steps.classify.outputs.node }}
       rust: ${{ steps.classify.outputs.rust }}
@@ -32,6 +33,7 @@ jobs:
 
   static-checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -49,6 +51,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -62,6 +65,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -77,6 +81,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo clippy --workspace --exclude opendrive-app --lib --no-deps --locked -- -D unused-crate-dependencies
+      - run: cargo clippy -p opendrive-app --all-targets --features tray --locked -- -D warnings
       - run: cargo test --workspace --locked
       - run: npm run test:coverage:rust
 
@@ -84,6 +90,7 @@ jobs:
     if: always()
     needs: [changes, static-checks, node-coverage, rust-quality]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Check all gate results
         env:

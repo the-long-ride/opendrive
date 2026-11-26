@@ -8,12 +8,12 @@ summary: "CLI subcommands (including Explorer, Sync Down/Up/Clear, Open-Item, St
 tags: ["cli", "bridge", "explorer", "media-server", "streaming", "sync", "tray", "desktop", "auth-runner", "secret-store", "mount-manager"]
 source_paths: ["crates/opendrive-app/src/lib.rs", "crates/opendrive-app/src/main.rs", "crates/opendrive-app/src/runtime/auth_runner/complete.rs", "crates/opendrive-app/src/runtime/auth_runner/endpoints.rs", "crates/opendrive-app/src/runtime/auth_runner/mod.rs", "crates/opendrive-app/src/runtime/bridge.rs", "crates/opendrive-app/src/runtime/bridge_types.rs", "crates/opendrive-app/src/runtime/bridge_vault.rs", "crates/opendrive-app/src/runtime/cli.rs", "crates/opendrive-app/src/runtime/cli_commands.rs", "crates/opendrive-app/src/runtime/cli_self_check.rs", "crates/opendrive-app/src/runtime/explorer_batch.rs", "crates/opendrive-app/src/runtime/explorer_file_ops.rs", "crates/opendrive-app/src/runtime/explorer_helpers.rs", "crates/opendrive-app/src/runtime/explorer_open.rs", "crates/opendrive-app/src/runtime/explorer_ops.rs", "crates/opendrive-app/src/runtime/media_server.rs", "crates/opendrive-app/src/runtime/mod.rs", "crates/opendrive-app/src/runtime/mount_manager/backend.rs", "crates/opendrive-app/src/runtime/mount_manager/live.rs", "crates/opendrive-app/src/runtime/mount_manager/mod.rs", "crates/opendrive-app/src/runtime/mount_manager/sync_ops.rs", "crates/opendrive-app/src/runtime/mount_manager/virtual_drive.rs", "crates/opendrive-app/src/runtime/ui.rs", "crates/opendrive-app/src/shell/tray_loop.rs", "crates/opendrive-app/tests/bridge_ui_tests.rs", "crates/opendrive-app/tests/cli_and_explorer_cov_tests.rs", "crates/opendrive-app/tests/media_stream_and_cli_tests.rs", "crates/opendrive-app/tests/mount_manager_tests.rs", "crates/opendrive-app/tests/review_fixes_tests.rs", "crates/opendrive-app/tests/runtime_cli_coverage_tests.rs", "crates/opendrive-app/tests/runtime_cov_extra_tests.rs", "crates/opendrive-app/tests/runtime_coverage_tests.rs", "crates/opendrive-app/tests/runtime_explorer_cov_tests.rs", "crates/opendrive-app/tests/runtime_vault_cov_tests.rs", "crates/opendrive-app/tests/support/mod.rs", "crates/opendrive-app/tests/ui_and_cli_cov_final_tests.rs"]
 related_specs: ["architecture.workspace-overview", "feature.oauth-credentials", "feature.drive-v3-client", "architecture.os-fs-adapters", "feature.control-center-ui", "workflow.sync-hydration-conflicts"]
-last_doc_update_at: "2026-11-26T07:07:19Z"
-last_verified_at: "2026-11-26T07:07:19Z"
-last_verified_code_commit: "aa2135c5d17ce0016d4fa42bb2c2705bbba7c709"
+last_doc_update_at: "2026-11-26T09:51:00Z"
+last_verified_at: "2026-11-26T09:51:00Z"
+last_verified_code_commit: "87c4603636ce9dd8cab72a3d2260e7b1e8482fc3"
 last_source_change_commit: "7fa024523edc013036c9c3adbf00da3c3b5b191f"
 last_source_change_at: "2026-11-26T14:29:57+07:00"
-source_fingerprint: "sha256:5ab4d795bebaa9d1854a7c71f9616e8ab7b7b64dd3c52878c5792dee20fe9498"
+source_fingerprint: "sha256:5cbaa95b3d490dfea11e32cd66fd603520d5d3c9949d804f584e551734d73d6f"
 ---
 # CLI Commands, Synchronous Control Bridge, and Auth Runners
 

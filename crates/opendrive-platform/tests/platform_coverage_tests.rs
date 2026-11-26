@@ -1,10 +1,12 @@
 //! Coverage tests for `opendrive-platform` top-level APIs and error formatting.
 
 use opendrive_platform::{
-    autostart_command, notify, open_drive_file, set_autostart, spawn_detached_background,
-    wait_for_process_exit, PlatformError, TrayAction,
+    autostart_command, is_process_alive, notify, notify_shell_mounts_changed, open_drive_file,
+    set_autostart, spawn_detached_background, wait_for_process_exit, PlatformError, TrayAction,
 };
 use std::path::Path;
+use std::sync::mpsc;
+use std::time::Duration;
 
 #[test]
 fn error_display_tray_actions_and_autostart_on_off() {
@@ -43,8 +45,28 @@ fn open_drive_file_rejects_empty_and_whitespace() {
     }
 }
 
+fn wait_for_exit_bounded(pid: u32) {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        wait_for_process_exit(pid);
+        let _ = tx.send(());
+    });
+    assert!(
+        rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "wait_for_process_exit({pid}) timed out"
+    );
+}
+
 #[test]
 fn acquire_instance_lock_and_wait_for_process_exit() {
+    notify_shell_mounts_changed();
+    assert!(is_process_alive(std::process::id()));
+    assert!(
+        !is_process_alive(0) && !is_process_alive(i32::MAX as u32) && !is_process_alive(u32::MAX)
+    );
+    wait_for_exit_bounded(0);
+    wait_for_exit_bounded(u32::MAX);
+
     let tmp = std::env::temp_dir().join(format!("od-plat-lock-{}", std::process::id()));
     let lock_path = tmp.join("opendrive.lock");
     assert!(opendrive_platform::acquire_instance_lock(&lock_path).is_ok());
@@ -55,8 +77,14 @@ fn acquire_instance_lock_and_wait_for_process_exit() {
     #[cfg(not(windows))]
     let (prog, args) = (Path::new("sh"), ["-c", "exit 0"].as_slice());
     let mut child = spawn_detached_background(prog, args).unwrap();
-    wait_for_process_exit(child.id());
-    let _ = child.wait();
+    wait_for_exit_bounded(child.id());
+    assert!(child.wait().unwrap().success());
+    #[cfg(not(windows))]
+    {
+        let mut slow = spawn_detached_background(Path::new("sh"), &["-c", "sleep 0.06"]).unwrap();
+        wait_for_exit_bounded(slow.id());
+        assert!(slow.wait().unwrap().success());
+    }
     let _ = std::fs::remove_dir_all(&tmp);
 
     assert!(opendrive_platform::normalize_drive_letter("A").is_err());

@@ -180,7 +180,7 @@ async fn mount_platform(
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = root_node;
+        let _ = (account_name, root_node);
         let mut frontend = opendrive_fs_macos::NfsFrontend::new(engine);
         let addr = frontend
             .serve_loopback()

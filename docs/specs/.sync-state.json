@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "last_sync_commit": "aa2135c5d17ce0016d4fa42bb2c2705bbba7c709",
-  "last_full_scan_commit": "aa2135c5d17ce0016d4fa42bb2c2705bbba7c709",
-  "last_sync_at": "2026-11-26T07:07:19Z",
+  "last_sync_commit": "87c4603636ce9dd8cab72a3d2260e7b1e8482fc3",
+  "last_full_scan_commit": "87c4603636ce9dd8cab72a3d2260e7b1e8482fc3",
+  "last_sync_at": "2026-11-26T09:51:00Z",
   "inventory_complete": true,
   "source_to_specs": {
     "crates/opendrive-app/src/design/avatars.rs": ["feature.control-center-ui"],
@@ -86,6 +86,10 @@
     "crates/opendrive-app/tests/cli_and_explorer_cov_tests.rs": ["interface.cli-http-bridge"],
     "crates/opendrive-app/tests/common_auth_helpers.rs": ["feature.control-center-ui"],
     "crates/opendrive-app/tests/desktop_actions_cov_tests.rs": ["feature.control-center-ui"],
+    "crates/opendrive-app/tests/desktop_interactions_cov_tests.rs": ["feature.control-center-ui"],
+    "crates/opendrive-app/tests/desktop_ledger_explorer_cov_tests.rs": [
+      "feature.control-center-ui"
+    ],
     "crates/opendrive-app/tests/desktop_render_tests.rs": ["feature.control-center-ui"],
     "crates/opendrive-app/tests/desktop_ui_tests.rs": ["feature.control-center-ui"],
     "crates/opendrive-app/tests/explorer_extra_ui_tests.rs": ["feature.control-center-ui"],
@@ -214,6 +218,7 @@
     "crates/opendrive-sync/tests/root_discovery_tests.rs": ["workflow.sync-hydration-conflicts"],
     "crates/opendrive-sync/tests/stream_extra_tests.rs": ["workflow.sync-hydration-conflicts"],
     "crates/opendrive-sync/tests/stream_replica_tests.rs": ["workflow.sync-hydration-conflicts"],
+    "crates/opendrive-sync/tests/sync_branch_cov_tests.rs": ["workflow.sync-hydration-conflicts"],
     "crates/opendrive-sync/tests/sync_coverage_tests.rs": ["workflow.sync-hydration-conflicts"],
     "crates/opendrive-sync/tests/sync_edge_cov_tests.rs": ["workflow.sync-hydration-conflicts"],
     "crates/opendrive-sync/tests/sync_final_cov_tests.rs": ["workflow.sync-hydration-conflicts"],
@@ -236,6 +241,7 @@
     "scripts/test-coverage-rust.mjs": ["architecture.quality-gate"],
     "scripts/test/ci-changes.test.mjs": ["architecture.quality-gate"],
     "scripts/test/desktop-launch.test.mjs": ["architecture.quality-gate"],
+    "scripts/test/lint.test.mjs": ["architecture.quality-gate"],
     "scripts/test/loc-lint.test.mjs": ["architecture.quality-gate"],
     "scripts/test/quality-gate.test.mjs": ["architecture.quality-gate"],
     "scripts/test/release-gate.test.mjs": ["architecture.quality-gate"],

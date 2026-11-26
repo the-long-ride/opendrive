@@ -43,6 +43,11 @@ fn cleanup_os_mounts_with(
     notify();
 }
 
+fn unregister_all_os_roots() {
+    #[cfg(windows)]
+    opendrive_fs_windows::unregister_all_opendrive_roots();
+}
+
 /// Unmounts all OpenDrive Windows Cloud Files sync roots, `This PC` namespace, and legacy `subst` drives.
 pub fn cleanup_os_mounts(mount_root: &Path, letter: &str) {
     let cfg_letter = configured_drive_letter();
@@ -50,7 +55,7 @@ pub fn cleanup_os_mounts(mount_root: &Path, letter: &str) {
         mount_root,
         letter,
         &cfg_letter,
-        opendrive_fs_windows::unregister_all_opendrive_roots,
+        unregister_all_os_roots,
         |root| {
             let _ = opendrive_platform::sync_this_pc_namespace(false, root, None, None);
         },
@@ -84,16 +89,13 @@ fn cleanup_os_mounts_with_pid_file(
     if is_foreign_owner_in(pid_path, exited_pid) {
         return;
     }
-    if let Some(path) = pid_path {
-        let _ = std::fs::remove_file(path);
-    }
+    let _ = pid_path.map(std::fs::remove_file);
     cleanup();
 }
 
 /// Cleans up OS mounts for an exited process unless another live OpenDrive instance claimed ownership.
 pub fn cleanup_os_mounts_for_pid(exited_pid: u32, mount_root: &Path, letter: &str) {
-    let pid_path = mount_owner_pid_path();
-    cleanup_os_mounts_with_pid_file(pid_path.as_deref(), exited_pid, || {
+    cleanup_os_mounts_with_pid_file(mount_owner_pid_path().as_deref(), exited_pid, || {
         cleanup_os_mounts(mount_root, letter);
     });
 }
@@ -101,9 +103,7 @@ pub fn cleanup_os_mounts_for_pid(exited_pid: u32, mount_root: &Path, letter: &st
 /// Installs Windows console Ctrl/Close/Shutdown handlers that remove OS mounts before exit.
 pub fn install_process_mount_guards(root: &Path, letter: Option<&str>) {
     let guard_root = root.to_path_buf();
-    let guard_letter = letter
-        .map(str::to_owned)
-        .unwrap_or_else(configured_drive_letter);
+    let guard_letter = letter.map_or_else(configured_drive_letter, str::to_owned);
     opendrive_platform::install_console_cleanup_handler(move || {
         cleanup_os_mounts_for_pid(std::process::id(), &guard_root, &guard_letter);
     });
@@ -194,7 +194,10 @@ impl MountBackend for LiveMountBackend {
     }
 
     fn unregister_account(&self, path: &Path) {
+        #[cfg(windows)]
         opendrive_fs_windows::unregister_os_sync_root(path);
+        #[cfg(not(windows))]
+        let _ = path;
         opendrive_platform::notify_shell_mounts_changed();
     }
 
@@ -202,7 +205,7 @@ impl MountBackend for LiveMountBackend {
         if is_foreign_mount_owner_alive() {
             return;
         }
-        opendrive_fs_windows::unregister_all_opendrive_roots();
+        unregister_all_os_roots();
         opendrive_platform::notify_shell_mounts_changed();
     }
 
@@ -214,17 +217,14 @@ impl MountBackend for LiveMountBackend {
     }
 
     fn set_virtual_drive(&self, enabled: bool, letter: &str, root: &Path) -> Result<(), String> {
+        opendrive_platform::normalize_drive_letter(letter).map_err(|e| e.to_string())?;
         if enabled {
             opendrive_platform::mount_virtual_drive(letter, root).map_err(|e| e.to_string())?;
             spawn_mount_watchdog(root, Some(letter));
-            Ok(())
-        } else {
-            match opendrive_platform::unmount_virtual_drive(letter) {
-                Ok(()) => Ok(()),
-                Err(_) if !opendrive_platform::is_virtual_drive_supported() => Ok(()),
-                Err(e) => Err(e.to_string()),
-            }
+        } else if opendrive_platform::is_virtual_drive_supported() {
+            opendrive_platform::unmount_virtual_drive(letter).map_err(|e| e.to_string())?;
         }
+        Ok(())
     }
 
     fn dehydrate_path(&self, path: &Path) {
@@ -235,11 +235,12 @@ impl MountBackend for LiveMountBackend {
     }
 
     fn cleanup_legacy_subst(&self, letter: &str, root: &Path) -> Result<(), String> {
-        match opendrive_platform::unmount_virtual_drive_for_target(letter, root) {
-            Ok(()) => Ok(()),
-            Err(_) if !opendrive_platform::is_virtual_drive_supported() => Ok(()),
-            Err(e) => Err(e.to_string()),
+        opendrive_platform::normalize_drive_letter(letter).map_err(|e| e.to_string())?;
+        if !opendrive_platform::is_virtual_drive_supported() {
+            return Ok(());
         }
+        opendrive_platform::unmount_virtual_drive_for_target(letter, root)
+            .map_err(|e| e.to_string())
     }
 
     fn sync_this_pc_namespace(

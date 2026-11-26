@@ -70,9 +70,14 @@ fn bar_rects(shapes: &[egui::epaint::ClippedShape], y_max: f32) -> Vec<(Rect, bo
     out
 }
 
-#[test]
-fn titlebar_sync_toggle_divider_compact_and_tooltip_branches() {
-    let (bridge, _rx) = Bridge::new(Settings::default());
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn titlebar_sync_toggle_divider_compact_and_tooltip_branches() {
+    let tmp = std::env::temp_dir().join(format!("od-tb-cov-{}", Uuid::new_v4()));
+    let (addr, drive_h) = FakeDriveServer::start(seed_drive(&[], 0, 1000)).await;
+    let (br, _rx) = Bridge::new(Settings::default());
+    let bridge = br.with_mount_manager(Arc::new(
+        MountManager::new_null().with_mount_root(tmp.clone()),
+    ));
     let mut app = ControlCenterApp::new(bridge.clone());
     let ctx = egui::Context::default();
 
@@ -80,9 +85,7 @@ fn titlebar_sync_toggle_divider_compact_and_tooltip_branches() {
     let t0 = collect(&s0);
     assert!(!has(&t0, "Pause") && !has(&t0, "Resume") && has(&t0, "Color"));
 
-    bridge
-        .add_account("Work".into(), "work@x.com".into(), "Work".into(), false)
-        .unwrap();
+    add_acct(&bridge, bridge.engine(), "Work", addr, 0, 1000);
     app.refresh();
     assert_eq!(app.state.accounts[0].status, AccountStatus::Connected);
 
@@ -180,6 +183,8 @@ fn titlebar_sync_toggle_divider_compact_and_tooltip_branches() {
         );
     });
     ui_out.textures_delta.clear();
+    drive_h.abort();
+    let _ = std::fs::remove_dir_all(tmp);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

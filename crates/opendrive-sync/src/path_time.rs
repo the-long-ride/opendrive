@@ -195,5 +195,23 @@ mod tests {
         );
         assert_eq!(parse_rfc3339_ms("invalid"), 0);
         assert_eq!(parse_rfc3339_ms("2024-13-01T00:00:00Z"), 0);
+        assert_eq!(super::sanitize_name(""), "file");
+        assert_eq!(
+            super::sanitize_name("a/b\\c:d*e?f\"g<h>i|j"),
+            "a_b_c_d_e_f_g_h_i_j"
+        );
+        for bad in [
+            "short",
+            "1970-01-01X00:00:00Z",
+            "abcd-01-01T00:00:00Z",
+            "1970-ab-01T00:00:00Z",
+            "1970-01-01T00:00:00.Z",
+            "1970-01-01T00:00:00+ab:00",
+            "1970-01-01T00:00:00+25:00",
+            "1970-01-01T00:00:00Q",
+        ] {
+            assert_eq!(parse_rfc3339_ms(bad), 0, "input={bad}");
+        }
+        assert_eq!(parse_rfc3339_ms("1970-01-01T00:00:00-02:00"), 7_200_000);
     }
 }

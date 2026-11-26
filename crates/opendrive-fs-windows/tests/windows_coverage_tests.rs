@@ -20,6 +20,8 @@ fn register_sync_root_fails_when_parent_is_a_file_and_unregister_missing_os_root
 
     // Safe on nonexistent path: SyncRootId::from_path returns Err without mutating any OS root.
     unregister_os_sync_root(&base.join("nonexistent-sync-root"));
+    #[cfg(not(windows))]
+    opendrive_fs_windows::unregister_all_opendrive_roots();
 
     let _ = std::fs::remove_dir_all(&base);
 }

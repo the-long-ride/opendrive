@@ -264,3 +264,29 @@ async fn write_json(sock: &mut tokio::net::TcpStream, body: &str) -> std::io::Re
     );
     sock.write_all(hdr.as_bytes()).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn parse_req_range_edge_cases() {
+        assert_eq!(parse_req_range("Range: bytes=2-5\r\n", 10), (2, 5));
+        assert_eq!(parse_req_range("Range: bytes=4-\r\n", 10), (4, 9));
+        assert_eq!(parse_req_range("Range: bytes=0-99\r\n", 10), (0, 9));
+        assert_eq!(parse_req_range("Range: bytes=abc-5\r\n", 10), (0, 5));
+        assert_eq!(parse_req_range("GET / HTTP/1.1\r\n", 0), (0, 0));
+    }
+
+    #[tokio::test]
+    async fn mock_drive_handles_eof_and_unknown_routes() {
+        let (addr, _srv) = start_mock_drive(Arc::new(b"abcd".to_vec())).await.unwrap();
+        drop(tokio::net::TcpStream::connect(addr).await.unwrap());
+        let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+        s.write_all(b"GET /unknown HTTP/1.1\r\n\r\n").await.unwrap();
+        let mut buf = String::new();
+        let _ = s.read_to_string(&mut buf).await;
+        assert!(buf.contains("200 OK") && buf.contains("{}"));
+    }
+}

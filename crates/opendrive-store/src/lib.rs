@@ -170,3 +170,85 @@ impl Store {
             .map_err(Into::into)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn types_open_err_and_dropped_table_errors() {
+        let states = [
+            ("hydrating", NodeState::Hydrating),
+            ("cached", NodeState::Cached),
+            ("dirty", NodeState::Dirty),
+            ("conflict", NodeState::Conflict),
+            ("unknown", NodeState::Placeholder),
+        ];
+        for (s, st) in &states {
+            assert_eq!(NodeState::parse(s), *st);
+            assert!(!st.as_str().is_empty());
+        }
+        assert!(Store::open(&std::env::temp_dir().to_string_lossy()).is_err());
+        let store = Store::open_in_memory().unwrap();
+        let acct = Uuid::new_v4();
+        let mut node = Node {
+            id: 1,
+            account_id: acct,
+            drive_id: "d".into(),
+            parent_id: None,
+            name: "n".into(),
+            display_name: String::new(),
+            kind: "folder".into(),
+            mime: None,
+            size: 0,
+            md5: None,
+            modified_ms: 0,
+            head_revision: None,
+            trashed: false,
+            shared_drive_id: None,
+            state: NodeState::Placeholder,
+            pinned: false,
+            last_access_ms: 0,
+        };
+        assert_eq!(node.effective_name(), "n");
+        node.display_name = "dn".into();
+        assert_eq!(node.effective_name(), "dn");
+        assert!(node.is_folder());
+        assert!(!node.is_native_doc());
+
+        store
+            .conn
+            .execute_batch(
+                "DROP TABLE upload_queue; DROP TABLE cache_files; DROP TABLE change_tokens; DROP TABLE nodes;",
+            )
+            .unwrap();
+        assert!(store.next_id().is_err());
+        assert!(store.upsert_node(&node).is_err());
+        assert!(store.find_by_drive_id(acct, "d").is_err());
+        assert!(store.get_node(1).is_err());
+        assert!(store.list_children(1).is_err());
+        assert!(store.list_children_sorted(1).is_err());
+        assert!(store
+            .update_node_state(1, NodeState::Cached, Some(true))
+            .is_err());
+        assert!(store.update_node_state(1, NodeState::Cached, None).is_err());
+        assert!(store.mark_drive_id_trashed(acct, "d").is_err());
+        assert!(store.set_change_token(acct, "t").is_err());
+        assert!(store.get_change_token(acct).is_err());
+        assert!(store.set_cache_entry(1, "/a", 1, false).is_err());
+        assert!(store.get_cache_path(1).is_err());
+        assert!(store.cache_bytes_total().is_err());
+        assert!(store.eviction_candidates(5).is_err());
+        assert!(store.remove_cache_entry(1).is_err());
+        assert!(store.touch_access(1).is_err());
+        assert!(store.clear_node_cache_state(1).is_err());
+        assert!(store.trash_node_and_clear(1).is_err());
+        assert!(store.relocate_cache_prefix("/a", "/b").is_err());
+        assert!(store.enqueue_upload(1, "create", None).is_err());
+        assert!(store.next_upload().is_err());
+        assert!(store.next_upload_for_account(acct).is_err());
+        assert!(store.update_upload(1, "done", 1, 0, None).is_err());
+        assert!(store.mark_node_uploads_done(1).is_err());
+        assert!(store.queue_depth().is_err());
+    }
+}

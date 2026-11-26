@@ -23,10 +23,12 @@ pub struct SyncRootIdentity {
 
 pub const SYNC_ROOT_PROVIDER: &str = "OpenDrive";
 
+#[cfg(any(windows, test))]
 pub(crate) fn sanitize_sync_root_account(name: &str) -> String {
     name.replace('!', "_")
 }
 
+#[cfg(any(windows, test))]
 pub(crate) fn is_opendrive_sync_root_id(raw: &str) -> bool {
     raw.strip_prefix(SYNC_ROOT_PROVIDER)
         .is_some_and(|rest| rest.starts_with('!'))

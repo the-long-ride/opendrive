@@ -31,7 +31,6 @@ anyhow = "1"
 tracing = "0.1"
 async-trait = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
 bytes = "1"
 parking_lot = "0.12"
 sha2 = "0.10"
@@ -49,3 +48,9 @@ dirs = "5"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+[workspace.lints.rust]
+unused = { level = "deny", priority = -1 }
+dead_code = "deny"
+unused_lifetimes = "deny"
+unused_import_braces = "deny"

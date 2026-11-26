@@ -6,7 +6,7 @@ use common_auth_helpers::{
     mock_token_server, sample_service_account_json, FailingSecretStore, RecordingBackend,
 };
 use opendrive_app::runtime::bridge::Bridge;
-use opendrive_app::runtime::mount_manager::live::LiveMountBackend;
+use opendrive_app::runtime::mount_manager::live::{cleanup_os_mounts_for_pid, LiveMountBackend};
 use opendrive_app::runtime::mount_manager::{MountBackend, MountManager, NullMountBackend};
 use opendrive_auth::{MemorySecretStore, SecretStore, DEFAULT_TOKEN_URI};
 use opendrive_core::{Account, AccountStatus, AppController, CredentialSet, Settings};
@@ -84,13 +84,24 @@ fn live_and_null_mount_backends_and_watchdog_branches() {
     null.sync_this_pc_namespace(false, &tmp, None).unwrap();
 
     let live = LiveMountBackend;
+    std::env::set_var("OPENDRIVE_DISABLE_WATCHDOG", "1");
+    let _ = live.prepare_root(&tmp);
+    opendrive_app::runtime::mount_manager::live::spawn_mount_watchdog(&tmp, Some("O"));
     live.dehydrate_path(&tmp);
     live.dehydrate_path(&tmp.join("missing"));
     live.reconcile_placeholders(&tmp, &[PathBuf::from("sub")]);
     assert!(live.set_virtual_drive(true, "C", &tmp).is_err());
     assert!(live.set_virtual_drive(false, "12", &tmp).is_err());
     assert!(live.cleanup_legacy_subst("12", &tmp).is_err());
-
+    if !cfg!(windows) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let eng: Arc<dyn VfsEngine> = Arc::new(opendrive_sync::PlaceholderEngine);
+        let a = acct(Uuid::new_v4(), Uuid::new_v4(), "nix");
+        let _ = live.connect_account(&a, &tmp, 1, eng, rt.handle());
+        live.unregister_account(&tmp);
+        live.unregister_all_accounts();
+        cleanup_os_mounts_for_pid(std::process::id(), &tmp, "P");
+    }
     let _ = opendrive_app::runtime::mount_manager::live::is_foreign_mount_owner_alive();
     let _ = std::fs::remove_dir_all(&tmp);
 }
