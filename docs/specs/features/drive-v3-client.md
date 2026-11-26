@@ -6,14 +6,14 @@ kind: "feature"
 status: "verified"
 summary: "Thin reqwest-based Google Drive v3 client (about, shared drives, file listing, byte-range download, changes feed, resumable uploads, metadata/trash mutations, 429 backoff) and an in-process HTTP/1.1 test double."
 tags: ["drive-v3", "http", "resumable-upload", "changes", "backoff", "fake-drive", "testing"]
-source_paths: ["crates/opendrive-drive/src/client.rs", "crates/opendrive-drive/src/lib.rs", "crates/opendrive-drive/src/retry.rs", "crates/opendrive-drive/src/transfer.rs", "crates/opendrive-drive/src/types.rs", "crates/opendrive-drive/tests/drive_http_tests.rs", "crates/opendrive-drive/tests/drive_shared_tests.rs", "crates/opendrive-fake-drive/src/extras.rs", "crates/opendrive-fake-drive/src/http.rs", "crates/opendrive-fake-drive/src/lib.rs", "crates/opendrive-fake-drive/src/server.rs", "crates/opendrive-fake-drive/src/types.rs", "crates/opendrive-fake-drive/tests/fake_drive_tests.rs"]
+source_paths: ["crates/opendrive-drive/src/client.rs", "crates/opendrive-drive/src/lib.rs", "crates/opendrive-drive/src/retry.rs", "crates/opendrive-drive/src/transfer.rs", "crates/opendrive-drive/src/types.rs", "crates/opendrive-drive/tests/drive_coverage_tests.rs", "crates/opendrive-drive/tests/drive_http_tests.rs", "crates/opendrive-drive/tests/drive_shared_tests.rs", "crates/opendrive-fake-drive/src/extras.rs", "crates/opendrive-fake-drive/src/http.rs", "crates/opendrive-fake-drive/src/lib.rs", "crates/opendrive-fake-drive/src/server.rs", "crates/opendrive-fake-drive/src/types.rs", "crates/opendrive-fake-drive/tests/fake_drive_tests.rs"]
 related_specs: ["feature.oauth-credentials", "workflow.sync-hydration-conflicts"]
-last_doc_update_at: "2026-11-17T21:18:00Z"
-last_verified_at: "2026-11-17T21:18:00Z"
-last_verified_code_commit: "fe2045703b98bdd6f83c55ecdf88d92b31bb1495"
-last_source_change_commit: "4c14192584395c4c33f9bbc33815003cb49c3604"
-last_source_change_at: "2026-11-18T13:03:12+07:00"
-source_fingerprint: "sha256:034502fc4d253802dc03ac23dd49688a70d67f6f454e161cb1a6b4daaa1da997"
+last_doc_update_at: "2026-11-26T07:07:19Z"
+last_verified_at: "2026-11-26T07:07:19Z"
+last_verified_code_commit: "aa2135c5d17ce0016d4fa42bb2c2705bbba7c709"
+last_source_change_commit: "600d2df0ad0c4d97420d87fa94048e4eac1b8129"
+last_source_change_at: "2026-11-26T14:29:37+07:00"
+source_fingerprint: "sha256:932a0d4b67a976834d7710158917f5c3ab342159f01dd58faed55372bee83798"
 ---
 
 # Google Drive v3 HTTP client and in-process fake Drive server
@@ -35,44 +35,46 @@ Out of scope: OAuth token acquisition/refresh (`opendrive-auth`), local SQLite p
   - Non-success other than `308` -> `DriveError::Http("{status}: {body}")`
 - `with_backoff(f, max_attempts)` retries only `Err(DriveError::RateLimited)` while `attempt + 1 < max_attempts`, sleeping `(250 << attempt).min(30_000)` milliseconds between attempts.
 - Supported endpoints on `DriveClient`:
-  - `about()` (wrapped in `with_backoff(..., 5)`): `GET {api_base}/about?fields=user,storageQuota` -> `About` (including `photo_url` mapped from `user.photoLink`).
+  - `about()` (wrapped in `with_backoff(..., 5)`): `GET {api_base}/about?fields=user(emailAddress,displayName,photoLink),storageQuota` -> `About` (including `photo_url` mapped from `user.photoLink`).
   - `list_shared_drives(page_token)`: `GET {api_base}/drives?pageSize=100&fields=nextPageToken,drives(id,name)` (+ optional `pageToken`) -> `SharedDriveList`.
-  - `list_files(parent, page_token, supports_all_drives)` (wrapped in `with_backoff(..., 5)`): `GET {api_base}/files` with `q="'{parent}' in parents and trashed = false"`, `pageSize=100`, `FILE_FIELDS` (including `shortcutDetails(targetId,targetMimeType)`), optional `supportsAllDrives=true&includeItemsFromAllDrives=true` and `pageToken` -> `FileList` (populating `DriveFile::{shortcut_target_id, shortcut_target_mime}`).
+  - `root_folder_id()` (wrapped in `with_backoff(..., 5)`): `GET {api_base}/files/root?fields=id&supportsAllDrives=true` -> canonical root folder ID.
+  - `list_files(parent, page_token, supports_all_drives)` (wrapped in `with_backoff(..., 5)`): `GET {api_base}/files` with `q="'{parent}' in parents and trashed = false"`, `pageSize=100`, `FILE_FIELDS` (including `ownedByMe`, `sharedWithMeTime`, `shortcutDetails(targetId,targetMimeType)`), optional `supportsAllDrives=true&includeItemsFromAllDrives=true` and `pageToken` -> `FileList` (populating `DriveFile::{owned_by_me, shared_with_me, shortcut_target_id, shortcut_target_mime}`).
+  - `list_top_unparented_files()` (wrapped in `with_backoff(..., 5)`): `GET {api_base}/files` with `q="trashed = false and not 'root' in parents"`, `orderBy="viewedByMeTime desc,modifiedTime desc"`, filtering `f.parents.is_empty()` to surface unparented owned and link-opened top-level files.
   - `list_shared_with_me(page_token)` (wrapped in `with_backoff(..., 5)`): `GET {api_base}/files` with `q="sharedWithMe = true and trashed = false"`, `supportsAllDrives=true&includeItemsFromAllDrives=true`, and `FILE_FIELDS` -> `FileList`.
-  - `download_bytes(url)`: fetches raw image/asset bytes over HTTPS (`200` / `206` -> `Bytes`) for account avatar downloads.
+  - `download_bytes(url)`: fetches raw bytes from `url` without bearer auth (checking status via `check()` -> `Vec<u8>`) for account avatar downloads.
   - `download_range(file_id, offset, len)`: returns empty `Bytes` if `len == 0`; otherwise `GET {api_base}/files/{file_id}?alt=media` with `Range: bytes={offset}-{end}`. Returns bytes on `200`/`206`; delegates other statuses to `check()` (note: `308` passes `check()` and yields `Ok(Bytes::new())`).
   - `get_start_page_token()`: `GET {api_base}/changes/startPageToken?supportsAllDrives=true` -> `String`.
   - `changes(page_token)`: `GET {api_base}/changes` (`supportsAllDrives=true`, `includeItemsFromAllDrives=true`) -> `ChangeList` where `new_start_token` prefers `newStartPageToken` or falls back to `nextPageToken`, and each change resolves `file_id` from `fileId` or `file.id`.
   - `create_resumable(metadata)`: `POST {upload_base}/files?uploadType=resumable&supportsAllDrives=true` with JSON metadata, returning the `Location` response header (`DriveError::Other("missing Location header")` if absent).
   - `upload_chunk(session_uri, offset, total, data)`: `PUT {session_uri}` (without bearer auth) with `Content-Length` and `Content-Range` (`bytes */{total}` when `data` is empty; `bytes {offset}-{end}/{total}` otherwise). Returns `Ok(None)` on `308`, `Ok(Some(DriveFile))` on `200`/`201`, or maps errors via `check()`.
-  - `trash(file_id)`: `PATCH {api_base}/files/{file_id}` with `{"trashed": true}`.
-  - `update_metadata(file_id, patch)`: `PATCH {api_base}/files/{file_id}?supportsAllDrives=true` with `patch` -> `DriveFile`.
+  - `trash(file_id)`: `PATCH {api_base}/files/{file_id}?supportsAllDrives=true` with `{"trashed": true}`.
+  - `update_metadata(file_id, patch)`: `PATCH {api_base}/files/{file_id}?supportsAllDrives=true&fields={FILE_FIELDS}` with `patch` -> `DriveFile`.
+  - `copy_file(file_id, name, parent_id)`: `POST {api_base}/files/{file_id}/copy?supportsAllDrives=true&fields={FILE_FIELDS}` with `{"name": name, "parents": [parent_id]}` -> `DriveFile`.
+  - `move_file(file_id, add_parent, remove_parents, name)`: `PATCH {api_base}/files/{file_id}?supportsAllDrives=true&fields={FILE_FIELDS}&addParents={add_parent}` (+ optional `removeParents`) -> `DriveFile`.
   - `DriveClient::native_doc_link(file_id)` returns `https://drive.google.com/open?id={file_id}`. `is_native_google_doc(mime)` matches Google Docs, Sheets, and Slides MIME types.
 
 ### In-process test server (`opendrive-fake-drive`)
-- `FakeDrive` stores mutex-guarded files (pre-seeded with `"root"` folder `"My Drive"` at `"rev-1"`), shared drives, `FakeAbout`, a monotonic `change_token` starting at `1`, a `FakeChange` log, active `UploadSession` buffers, a one-shot `error_queue`, a sticky `forced_error`, and `FakeExtras` (supporting `sharedWithMe` items, `shortcutDetails` target metadata, `/about` `photoLink`, and `/assets/*` avatar binary fixtures).
-- `FakeDriveServer::start(Arc<FakeDrive>)` binds `127.0.0.1:0` and serves HTTP/1.1 routes `/drive/v3/about`, `/drive/v3/drives`, `/drive/v3/files`, `/drive/v3/files/{id}`, `/drive/v3/changes/startPageToken`, `/drive/v3/changes`, `/upload/drive/v3/files`, `/upload/session/{sid}`, and `/assets/*`. On each request, `drive.take_error()` is checked first (draining `error_queue` before `forced_error`) to inject HTTP error statuses.
+- `FakeDrive` stores mutex-guarded files (pre-seeded with `"root"` folder `"My Drive"` at `"rev-1"`, with `list_children` treating `"root"` and `root_real_id` as aliases), shared drives, `FakeAbout`, a monotonic `change_token` starting at `1`, a `FakeChange` log, active `UploadSession` buffers, a one-shot `error_queue`, a sticky `forced_error`, and `FakeExtras` (supporting `sharedWithMe` / `sharedWithMeTime`, `mark_unowned`, `set_root_real_id`, `list_not_in_root`, `shortcutDetails` target metadata, `/about` `photoLink`, and `/assets/*` avatar binary fixtures).
+- `FakeDriveServer::start(Arc<FakeDrive>)` binds `127.0.0.1:0` and serves HTTP/1.1 routes `/drive/v3/about`, `/drive/v3/drives`, `/drive/v3/files`, `/drive/v3/files/{id}`, `/drive/v3/files/{id}/copy` (`POST` server-side file copy), `PATCH /drive/v3/files/{id}` (`addParents`/`removeParents`/`name`/`trashed`), `/drive/v3/changes/startPageToken`, `/drive/v3/changes`, `/upload/drive/v3/files`, `/upload/session/{sid}`, and `/assets/*`. On each request, `drive.take_error()` is checked first (draining `error_queue` before `forced_error`) to inject HTTP error statuses.
 
 ## Code map
 - `crates/opendrive-drive/src/lib.rs` — crate exports for `DriveClient`, `with_backoff`, `is_native_google_doc`, and Drive data types.
-- `crates/opendrive-drive/src/types.rs` — `DriveError`, `FileJson`, `ShortcutDetailsJson`, `DriveFile` (with `shortcut_target_id`, `shortcut_target_mime`), `About` (with `photo_url`), `FileList`, `SharedDrive`, `SharedDriveList`, `ChangeList`, `Change`, `is_native_google_doc`.
+- `crates/opendrive-drive/src/types.rs` — `DriveError`, `FileJson`, `ShortcutDetailsJson`, `DriveFile` (with `owned_by_me`, `shared_with_me`, `shortcut_target_id`, `shortcut_target_mime`), `About` (with `photo_url`), `FileList`, `SharedDrive`, `SharedDriveList`, `ChangeList`, `Change`, `is_native_google_doc`.
 - `crates/opendrive-drive/src/retry.rs` — `with_backoff` and 4 unit tests.
 - `crates/opendrive-drive/src/client.rs` — `DriveClient` core, `check`, `send_json`, `about`, `list_shared_drives`, `list_files`, `list_shared_with_me`, `download_range`, `download_bytes`, `native_doc_link`.
-- `crates/opendrive-drive/src/transfer.rs` — `get_start_page_token`, `changes`, `create_resumable`, `upload_chunk`, `trash`, `update_metadata`.
-- `crates/opendrive-drive/tests/drive_http_tests.rs` — 4 HTTP integration tests against `FakeDriveServer` and a raw TCP mock.
-- `crates/opendrive-drive/tests/drive_shared_tests.rs` — integration test verifying `about().photo_url`, `list_shared_with_me`, `shortcutDetails`, and `download_bytes`.
+- `crates/opendrive-drive/src/transfer.rs` — `root_folder_id`, `list_top_unparented_files`, `get_start_page_token`, `changes`, `create_resumable`, `upload_chunk`, `trash`, `update_metadata`, `copy_file`, `move_file`.
+- `crates/opendrive-drive/tests/{drive_coverage_tests,drive_http_tests,drive_shared_tests}.rs` — HTTP/TCP mock integration tests covering `about`, shared drives, `list_top_unparented_files`, `list_shared_with_me`, `shortcutDetails`, `download_bytes`/`download_range` truncated-body errors, resumable uploads, and backoff.
 - `crates/opendrive-fake-drive/src/lib.rs` — `FakeDrive` in-memory state and mutation/fault-injection methods.
-- `crates/opendrive-fake-drive/src/extras.rs` — `FakeExtras`, `shared_with_me` / `shortcutDetails` queries, `photoLink`, and `/assets/*` fixture routes.
-- `crates/opendrive-fake-drive/src/types.rs` — `FakeFile`, `FakeSharedDrive`, `FakeAbout`, `FakeChange`, `UploadSession`, `bump_rev`.
+- `crates/opendrive-fake-drive/src/extras.rs` — `FakeDrive` extension methods (`set_photo_url`, `photo_url`, `mark_shared_with_me`, `list_shared_with_me`, `set_shortcut`, `set_static_asset`, `get_static_asset`, `mark_unowned`, `set_root_real_id`, `root_real_id`, `list_not_in_root`, `file_to_json`, `copy_file`, `patch_parents`).
+- `crates/opendrive-fake-drive/src/types.rs` — `FakeFile`, `FakeSharedDrive`, `FakeAbout`, `FakeChange`, `UploadSession`, `FakeExtras`, `file_to_json`, `bump_rev`.
 - `crates/opendrive-fake-drive/src/http.rs` — minimal HTTP/1.1 request reader, query/range/content-range parsers, and response writer.
 - `crates/opendrive-fake-drive/src/server.rs` — `FakeDriveServer` TCP listener and route dispatcher.
-- `crates/opendrive-fake-drive/tests/fake_drive_tests.rs` — 3 unit/HTTP tests covering `FakeDrive` state, resumable sessions, and malformed HTTP requests.
+- `crates/opendrive-fake-drive/tests/fake_drive_tests.rs` — Unit/HTTP tests covering `FakeDrive` state, resumable sessions, and malformed HTTP requests.
 
 ## Verification
-- Existing tests observed in source (not executed during this documentation pass):
-  - `crates/opendrive-drive/src/retry.rs`: 4 unit tests (`immediate_success`, `retries_on_rate_limited_then_succeeds`, `exhausts_max_attempts`, `does_not_retry_non_rate_limit_error`).
-  - `crates/opendrive-drive/tests/drive_http_tests.rs`: 4 integration tests (`about_and_shared_drives`, `list_download_update_trash_and_changes`, `resumable_upload_multi_chunk_and_empty`, `error_status_mapping_and_backoff_recovery`).
-  - `crates/opendrive-fake-drive/tests/fake_drive_tests.rs`: 3 tests (`fake_drive_crud_changes_and_errors`, `fake_drive_resumable_upload_session`, `fake_drive_server_edge_routes_and_malformed_requests`).
+- Verified in `cargo test -p opendrive-drive -p opendrive-fake-drive --locked`:
+  - `opendrive-drive` unit tests (`retry.rs`) + integration tests (`drive_coverage_tests.rs`, `drive_http_tests.rs`, `drive_shared_tests.rs`) pass.
+  - `opendrive-fake-drive/tests/fake_drive_tests.rs` pass against in-process `FakeDriveServer` and mock TCP listeners.
 - Gap: Live Google Drive v3 API behavior is not exercised in automated tests; all HTTP verification runs against `FakeDriveServer` or an inline raw TCP listener.
 
 ## Related documentation

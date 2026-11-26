@@ -6,14 +6,14 @@ kind: "feature"
 status: "verified"
 summary: "Google OAuth 2.0 PKCE loopback auth, Service Account JSON RS256 JWT bearer exchange, SecretStore abstraction (OsKeyringStore and MemorySecretStore), and integration tests."
 tags: ["auth", "oauth2", "pkce", "loopback", "keyring", "secret-store", "service-account", "google-drive"]
-source_paths: ["crates/opendrive-auth/src/keyring.rs", "crates/opendrive-auth/src/lib.rs", "crates/opendrive-auth/src/loopback.rs", "crates/opendrive-auth/src/pkce.rs", "crates/opendrive-auth/src/secret_store.rs", "crates/opendrive-auth/src/service_account.rs", "crates/opendrive-auth/src/vault.rs", "crates/opendrive-auth/tests/auth_tests.rs", "crates/opendrive-auth/tests/vault_tests.rs"]
+source_paths: ["crates/opendrive-auth/src/keyring.rs", "crates/opendrive-auth/src/lib.rs", "crates/opendrive-auth/src/loopback.rs", "crates/opendrive-auth/src/pkce.rs", "crates/opendrive-auth/src/secret_store.rs", "crates/opendrive-auth/src/service_account.rs", "crates/opendrive-auth/src/vault.rs", "crates/opendrive-auth/tests/auth_coverage_tests.rs", "crates/opendrive-auth/tests/auth_tests.rs", "crates/opendrive-auth/tests/vault_tests.rs"]
 related_specs: ["architecture.workspace-overview", "feature.drive-v3-client", "interface.cli-http-bridge", "feature.control-center-ui"]
-last_doc_update_at: "2026-11-18T11:30:00Z"
-last_verified_at: "2026-11-18T11:30:00Z"
-last_verified_code_commit: "6c7842ffe6679c5b65defd2cb6007f2ee35044e6"
-last_source_change_commit: "6c7842ffe6679c5b65defd2cb6007f2ee35044e6"
-last_source_change_at: "2026-11-18T11:30:00Z"
-source_fingerprint: "sha256:baa33f7d510c4b3a18e09f8b40579f2799c1c1cd9a91682d3ed651b444638e45"
+last_doc_update_at: "2026-11-26T07:07:19Z"
+last_verified_at: "2026-11-26T07:07:19Z"
+last_verified_code_commit: "aa2135c5d17ce0016d4fa42bb2c2705bbba7c709"
+last_source_change_commit: "600d2df0ad0c4d97420d87fa94048e4eac1b8129"
+last_source_change_at: "2026-11-26T14:29:37+07:00"
+source_fingerprint: "sha256:bf44da47a29a192cfab73eff0901f8ab317a3146da6de992b5a5bc90ca69696c"
 ---
 
 # OAuth 2.0 PKCE loopback authentication, Service Account JWT, and SecretStore
@@ -32,9 +32,9 @@ Out of scope: persisting public `Account` or `CredentialSet` JSON metadata (`ope
 
 ### Loopback redirect listener (`loopback.rs`)
 - `bind_loopback()` binds `127.0.0.1:0` and returns `(TcpListener, redirect_uri, SocketAddr)` where `redirect_uri` is `http://127.0.0.1:{port}/callback`.
-- `wait_for_redirect(listener, expected_state, timeout_secs)` accepts a single connection within `timeout_secs` (returning `LoopbackError::Timeout` on expiry), reads up to 4096 bytes of the HTTP request line, and parses `code` and `state` query parameters.
+- `wait_for_redirect(listener, expected_state, timeout_secs)` loops within `timeout_secs` (returning `LoopbackError::Timeout` on expiry), ignores empty TCP preconnects and responds `204 No Content` to non-callback requests (e.g. `/favicon.ico`) before handling `/callback` (`code`, `state`, `error`).
 - Query decoding converts `+` to space and `%XX` hex bytes via `u8::from_str_radix` (leaving invalid `%` sequences literal).
-- Regardless of `state` validity, it sends an `HTTP/1.1 200 OK` HTML response (`You can close this window.` when `code` is present, or `Missing code.` otherwise). It then returns `LoopbackError::BadRequest` if `code` is missing, `state` is missing, or `state != expected_state`.
+- It sends an `HTTP/1.1 200 OK` HTML response via `render_callback_html(err_detail)` rendered in the centered Light Neo-Brutalist palette (`#d6d4f0` dot-matrix backdrop, `#f8fafc` card, `#1c1e24` ink border, enlarged `76x76` / `42x42` checkmark or warning icon, without any redundant status pill) only marking success when `code` is present, `state == expected_state`, and `error` is absent (otherwise rendering distinct safe messages for denial/cancellation, missing authorization code, or state mismatch), then flushes/shuts down cleanly before returning `LoopbackError::BadRequest` / `LoopbackError::Io` on failures.
 
 ### Authorization and token exchange (`lib.rs`)
 - `AuthClient::new(client_id, client_secret)` targets Google endpoints `AUTH_URL` (`https://accounts.google.com/o/oauth2/v2/auth`) and `TOKEN_URL` (`https://oauth2.googleapis.com/token`); `AuthClient::with_endpoints` allows custom test/mock URLs.
@@ -42,7 +42,7 @@ Out of scope: persisting public `Account` or `CredentialSet` JSON metadata (`ope
 - `authorize(read_only)` binds loopback, opens the authorization URL in the system browser via `open::that`, waits up to 180 seconds for the redirect, and exchanges the code for `(access_token, refresh_token)`.
 - `exchange_code(code, verifier, redirect_uri)` POSTs form parameters (`grant_type=authorization_code`) to `token_url` and requires both `access_token` and `refresh_token` in the JSON response (`expires_in` is parsed but discarded).
 - `refresh(refresh_token)` POSTs `grant_type=refresh_token` and returns `access_token`.
-- `post_token_form` maps JSON `"error": "invalid_grant"` to `AuthError::InvalidGrant`, and any other JSON `error` string or HTTP/JSON parse error to `AuthError::OAuth(String)`.
+- `post_token_form` maps JSON `"error": "invalid_grant"` to `AuthError::InvalidGrant`, and any other JSON `error` (including optional `error_description`) or HTTP/JSON parse error to `AuthError::OAuth(String)`. `is_credential_rejection_error(msg)` classifies `invalid_client` and `unauthorized_client` errors case-insensitively.
 
 ### Service Account JSON & RS256 JWT (`service_account.rs`)
 - `ServiceAccountKey` deserializes `type`, `client_email`, `private_key`, `token_uri` (defaulting to `DEFAULT_TOKEN_URI` `"https://oauth2.googleapis.com/token"` when absent or empty), and optional `project_id`.
@@ -71,21 +71,18 @@ Out of scope: persisting public `Account` or `CredentialSet` JSON metadata (`ope
 2. **Service Account (No Login)**: Caller parses raw JSON or `.json` file via `ServiceAccountKey::from_json_or_path`, calls `fetch_access_token(read_only)` (which signs an RS256 JWT locally and exchanges it at `token_uri`), and persists raw JSON via `SecretStore::store_service_account_json`.
 
 ## Code map
-- `crates/opendrive-auth/src/lib.rs` — Re-exports, `AuthError`, `AuthClient`, `scope_for_access`, `post_token_form`, `authorization_url`, `authorize`, `exchange_code`, `refresh`.
+- `crates/opendrive-auth/src/lib.rs` — Re-exports, `AuthError`, `AuthClient`, `scope_for_access`, `post_token_form`, `is_credential_rejection_error`, `authorization_url`, `authorize`, `exchange_code`, `refresh`.
 - `crates/opendrive-auth/src/pkce.rs` — `PkceError`, `PkcePair`, `generate_pkce`, `random_state`, and 1 unit test.
-- `crates/opendrive-auth/src/loopback.rs` — `LoopbackError`, `RedirectParams`, `bind_loopback`, `wait_for_redirect`, `urlencoding_decode`, and 3 unit tests.
+- `crates/opendrive-auth/src/loopback.rs` — `LoopbackError`, `RedirectParams`, `bind_loopback`, `wait_for_redirect`, `render_callback_html`, `urlencoding_decode`, and 5 unit tests.
 - `crates/opendrive-auth/src/secret_store.rs` — `SecretStore` trait (`delete_account_secrets`) and `MemorySecretStore`.
 - `crates/opendrive-auth/src/keyring.rs` — `OsKeyringStore` and `"opendrive"` keyring wrappers (`store_refresh_token`, `load_refresh_token`, `delete_refresh_token`, `store_client_secret`, `load_client_secret`, `store_service_account_json`, `load_service_account_json`, `delete_service_account_json`).
 - `crates/opendrive-auth/src/service_account.rs` — `DEFAULT_TOKEN_URI`, `parse_pkcs8_pem`, `ServiceAccountKey` (`from_json_str`, `from_json_or_path`, `sign_jwt`, `fetch_access_token`).
 - `crates/opendrive-auth/src/vault.rs` — `validate_vault_password`, `VaultPayload`, `ExportedCredentialSet`, `ExportedAccount`, `EncryptedVaultFile`, `encrypt_vault`, `decrypt_vault`.
-- `crates/opendrive-auth/tests/auth_tests.rs` — 4 integration tests (`authorization_url_includes_scope_and_pkce`, `exchange_code_and_refresh_paths`, `memory_secret_store_roundtrip_and_delete`, `service_account_parsing_signing_and_token_exchange`).
-- `crates/opendrive-auth/tests/vault_tests.rs` — 2 integration tests verifying vault password policy (>8 chars + 4 classes), AES-256-GCM round-trip, wrong password, and corrupted envelope rejection.
+- `crates/opendrive-auth/tests/{auth_coverage_tests,auth_tests,vault_tests}.rs` — Integration tests covering OAuth URLs, PKCE, loopback redirect edge cases, mock token errors, `MemorySecretStore`, `ServiceAccountKey` error/token paths, and `.odcred` vault encryption/validation.
 
 ## Verification
-Verified in `opendrive-auth`:
-- `crates/opendrive-auth/tests/auth_tests.rs`: 4 tests verifying OAuth authorization URLs, mock TCP token server code exchange/refresh/error mapping, `MemorySecretStore` roundtrip + `delete_account_secrets`, and `ServiceAccountKey` PEM/JSON/file parsing, RS256 JWT signature verification with `ring`, and mock token exchange.
-- `crates/opendrive-auth/src/loopback.rs`: 3 tests (`redirect_success_decodes_params`, `redirect_rejects_state_mismatch_missing_code_and_timeout`, `urlencoding_decode_handles_percent_and_invalid`).
-- `crates/opendrive-auth/src/pkce.rs`: 1 test (`pkce_shape_and_random_state`).
+Verified in `opendrive-auth` (`cargo test -p opendrive-auth --locked`):
+- `crates/opendrive-auth/tests/{auth_tests,auth_coverage_tests,vault_tests}.rs` and unit tests in `crates/opendrive-auth/src/{lib,loopback,pkce,service_account}.rs` pass.
 - Gap: live OS keyring daemon round-trips in `OsKeyringStore` (`keyring.rs`) and real Google OAuth/token cloud endpoints are not exercised by unit tests.
 - Note on `AuthError::StateMismatch`: `AuthError` defines a `StateMismatch` variant, while `wait_for_redirect` currently returns `LoopbackError::BadRequest` on state mismatch (propagated as `AuthError::Loopback(LoopbackError::BadRequest)`).
 
