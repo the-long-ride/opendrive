@@ -29,6 +29,10 @@ pub enum AppCommand {
         id: Uuid,
         read_only: bool,
     },
+    MoveAccount {
+        id: Uuid,
+        delta: isize,
+    },
     PauseAll,
     ResumeAll,
     UpdateSettings(Settings),
@@ -70,6 +74,10 @@ impl AppController {
             AppCommand::SetReadOnly { id, read_only } => self.update_acct(id, |a| {
                 a.read_only = read_only;
             }),
+            AppCommand::MoveAccount { id, delta } => match self.accounts.move_account(id, delta) {
+                Ok(_) => vec![AppEvent::Ready],
+                Err(e) => vec![AppEvent::Error(e.to_string())],
+            },
             AppCommand::RenameAccount {
                 id,
                 nickname,

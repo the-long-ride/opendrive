@@ -72,6 +72,24 @@ pub struct Node {
     pub last_access_ms: i64,
 }
 
+impl Node {
+    pub fn effective_name(&self) -> &str {
+        if self.display_name.is_empty() {
+            &self.name
+        } else {
+            &self.display_name
+        }
+    }
+
+    pub fn is_folder(&self) -> bool {
+        self.kind == "folder"
+    }
+
+    pub fn is_native_doc(&self) -> bool {
+        self.kind == "native_doc"
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UploadRow {
     pub op_id: i64,
@@ -106,7 +124,7 @@ pub(crate) fn row_to_node(r: &Row<'_>) -> rusqlite::Result<Node> {
     })
 }
 
-pub(crate) fn now_ms() -> i64 {
+pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)

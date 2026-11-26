@@ -124,3 +124,26 @@ impl ServiceAccountKey {
             .ok_or_else(|| AuthError::OAuth("missing access_token".into()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pem_and_json_validation_cover_error_branches() {
+        assert!(parse_pkcs8_pem("").is_err());
+        assert!(parse_pkcs8_pem("not!base64").is_err());
+        assert!(parse_pkcs8_pem("AAAA").is_err());
+        assert!(ServiceAccountKey::from_json_str("{").is_err());
+        assert!(
+            ServiceAccountKey::from_json_str(r#"{"client_email":"bad","private_key":"AAAA"}"#)
+                .is_err()
+        );
+        assert!(ServiceAccountKey::from_json_str(
+            r#"{"client_email":"a@b.c","private_key":"AAAA","token_uri":"  "}"#
+        )
+        .is_err());
+        assert!(ServiceAccountKey::from_json_or_path("  ").is_err());
+        assert!(ServiceAccountKey::from_json_or_path("nonexistent-sa-path.json").is_err());
+    }
+}

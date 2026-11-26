@@ -115,23 +115,7 @@ pub fn default_folder_name(folder_override: &str, nickname: &str, email: &str) -
         .to_string()
 }
 
-pub fn format_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
-    if bytes == 0 {
-        return "0 B".into();
-    }
-    let mut val = bytes as f64;
-    let mut idx = 0usize;
-    while val >= 1024.0 && idx + 1 < UNITS.len() {
-        val /= 1024.0;
-        idx += 1;
-    }
-    if idx == 0 || val >= 10.0 {
-        format!("{val:.0} {}", UNITS[idx])
-    } else {
-        format!("{val:.1} {}", UNITS[idx])
-    }
-}
+pub use opendrive_platform::format_bytes_compact as format_bytes;
 
 pub fn format_bandwidth(limit: Option<u64>) -> String {
     match limit {
@@ -141,7 +125,7 @@ pub fn format_bandwidth(limit: Option<u64>) -> String {
 }
 
 pub fn format_account_storage(used: u64, quota: u64) -> Option<String> {
-    if quota > 0 {
+    if quota > 0 && quota >= used {
         let pct = compute_cache_ratio(used, quota);
         Some(format!(
             "{} / {} ({pct}%)",
@@ -256,4 +240,26 @@ pub fn format_platform_label(platform: &str) -> &'static str {
         "linux" => "Linux",
         _ => "Desktop",
     }
+}
+
+pub fn format_modified_date(modified_ms: i64) -> String {
+    if modified_ms <= 0 {
+        return "\u{2014}".into();
+    }
+    let total_secs = modified_ms / 1000;
+    let days = total_secs.div_euclid(86_400);
+    let secs_of_day = total_secs.rem_euclid(86_400);
+    let hour = secs_of_day / 3600;
+    let minute = (secs_of_day % 3600) / 60;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    format!("{year:04}-{m:02}-{d:02} {hour:02}:{minute:02}")
 }

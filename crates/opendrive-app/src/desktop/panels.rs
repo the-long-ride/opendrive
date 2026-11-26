@@ -4,10 +4,44 @@ use crate::design::theme::ThemePalette;
 use crate::design::widgets::{paint_icon, pill_button, ButtonVariant, IconKind};
 use crate::desktop::bento::{paint_bento_dots, render_bento_overview};
 use crate::desktop::ledger::render_accounts_ledger;
+use crate::desktop::modals::guide::render_cloud_guide_modal;
+use crate::desktop::modals::release::render_release_modal;
+use crate::desktop::modals::settings::render_settings_modal;
 use crate::desktop::{ControlCenterApp, NoticeTone, UiAction, UiNotice};
 use eframe::egui::{
     self, Align, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, Stroke, Vec2,
 };
+
+pub(super) fn render_overlays(
+    ctx: &egui::Context,
+    pal: &ThemePalette,
+    top_y: f32,
+    app: &mut ControlCenterApp,
+    actions: &mut Vec<UiAction>,
+) {
+    if app.settings_open {
+        render_settings_modal(
+            ctx,
+            pal,
+            top_y,
+            &app.state,
+            &mut app.vault_draft,
+            &mut app.open_rule_draft,
+            app.release_checking,
+            actions,
+        );
+    }
+    if app.guide_open {
+        render_cloud_guide_modal(ctx, pal, top_y, actions);
+    }
+    if let Some(release) = app.available_release.as_ref() {
+        render_release_modal(ctx, pal, top_y, release, actions);
+    }
+    if let Some(modal) = app.explorer.modal.as_mut() {
+        super::explorer::render_explorer_modal(ctx, pal, top_y, modal, actions);
+    }
+    render_notice_toast(ctx, pal, app.notice.as_ref(), actions);
+}
 
 pub fn render_workspace_panel(
     ui: &mut egui::Ui,
@@ -108,14 +142,22 @@ pub fn render_notice_toast(
         ),
     };
     egui::Area::new(egui::Id::unique("toast_notice"))
-        .anchor(egui::Align2::RIGHT_BOTTOM, Vec2::new(-18.0, -18.0))
+        .anchor(egui::Align2::RIGHT_BOTTOM, Vec2::new(-20.0, -20.0))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             ui.set_max_width(420.0);
-            Frame::new()
+            let rad = CornerRadius::same(8);
+            let shadow_slot = ui.painter().add(egui::Shape::Noop);
+            let res = Frame::new()
+                .outer_margin(Margin {
+                    left: 0,
+                    right: 4,
+                    top: 0,
+                    bottom: 4,
+                })
                 .fill(bg)
                 .stroke(Stroke::new(2.0, border))
-                .corner_radius(CornerRadius::same(8))
+                .corner_radius(rad)
                 .inner_margin(Margin::symmetric(14, 10))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -124,7 +166,8 @@ pub fn render_notice_toast(
                         paint_icon(ui.painter(), r, icon, fg);
                         ui.add(
                             egui::Label::new(RichText::new(&notice.message).size(13.0).color(fg))
-                                .wrap(),
+                                .wrap()
+                                .selectable(false),
                         );
                         if notice.tone == NoticeTone::Error
                             && pill_button(
@@ -152,6 +195,14 @@ pub fn render_notice_toast(
                         }
                     });
                 });
+            let card_r = egui::Rect::from_min_max(
+                res.response.rect.min,
+                res.response.rect.max - Vec2::splat(4.0),
+            );
+            ui.painter().set(
+                shadow_slot,
+                egui::Shape::rect_filled(card_r.translate(Vec2::splat(3.5)), rad, pal.tactile_ink),
+            );
         });
 }
 

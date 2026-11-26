@@ -2,10 +2,11 @@
 
 use crate::runtime::bridge_types::{engine_stats_sync, str_err};
 pub use crate::runtime::bridge_types::{AppStateResponse, StatsSnapshot};
+use crate::runtime::media_server::MediaStreamServer;
 use crate::runtime::mount_manager::MountManager;
 use opendrive_auth::{MemorySecretStore, SecretStore};
 use opendrive_core::{
-    save_settings, Account, AccountStatus, AppCommand, AppController, AppEvent, DocsMode, Settings,
+    Account, AccountStatus, AppCommand, AppController, AppEvent, DocsMode, Settings,
 };
 use opendrive_store::Store;
 use opendrive_sync::SyncEngine;
@@ -22,6 +23,7 @@ pub struct Bridge {
     pub(crate) data_dir: Option<PathBuf>,
     pub(crate) secrets: Arc<dyn SecretStore>,
     pub(crate) mounts: Arc<MountManager>,
+    pub(crate) media_server: Arc<Mutex<Option<MediaStreamServer>>>,
     cmd_tx: mpsc::UnboundedSender<AppCommand>,
 }
 
@@ -42,6 +44,7 @@ impl Bridge {
                 data_dir: None,
                 secrets,
                 mounts: Arc::new(MountManager::new_null()),
+                media_server: Arc::new(Mutex::new(None)),
                 cmd_tx,
             },
             cmd_rx,
@@ -220,7 +223,7 @@ impl Bridge {
                 "resume_all" => {
                     g.handle(AppCommand::ResumeAll);
                 }
-                "pause" | "resume" | "remove" | "toggle_readonly" => {
+                "pause" | "resume" | "remove" | "toggle_readonly" | "move_up" | "move_down" => {
                     let raw = id_opt
                         .map(str::trim)
                         .filter(|s| !s.is_empty())
@@ -234,6 +237,8 @@ impl Bridge {
                     let cmd = match action {
                         "pause" => AppCommand::PauseAccount { id },
                         "resume" => AppCommand::ResumeAccount { id },
+                        "move_up" => AppCommand::MoveAccount { id, delta: -1 },
+                        "move_down" => AppCommand::MoveAccount { id, delta: 1 },
                         "remove" => {
                             removed_id = Some(id);
                             AppCommand::RemoveAccount { id }
@@ -264,22 +269,18 @@ impl Bridge {
         autostart: bool,
         docs_mode: DocsMode,
     ) -> Result<AppStateResponse, String> {
-        let next = {
-            let mut g = self.ctrl.lock().expect("controller lock");
-            let mut updated = g.settings.clone();
-            updated.cache_max_size = cache_max_size;
-            updated.bandwidth_limit = bandwidth_limit;
-            updated.autostart = autostart;
-            updated.docs_mode = docs_mode;
-            g.handle(AppCommand::UpdateSettings(updated.clone()));
-            updated
-        };
-        self.engine.set_bandwidth_limit(bandwidth_limit);
-        opendrive_platform::set_autostart(autostart).map_err(str_err)?;
-        if let Some(dir) = &self.config_dir {
-            save_settings(dir, &next).map_err(str_err)?;
-        }
-        Ok(self.state_snapshot())
+        self.modify_settings(
+            |s| {
+                s.cache_max_size = cache_max_size;
+                s.bandwidth_limit = bandwidth_limit;
+                s.autostart = autostart;
+                s.docs_mode = docs_mode;
+            },
+            |s| {
+                self.engine.set_bandwidth_limit(s.bandwidth_limit);
+                opendrive_platform::set_autostart(s.autostart).map_err(str_err)
+            },
+        )
     }
 
     pub fn evict_cache(&self, max_bytes: u64) -> Result<AppStateResponse, String> {

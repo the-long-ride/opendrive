@@ -11,7 +11,7 @@
     "lint:source": "node scripts/lint.mjs",
     "lint:loc": "node scripts/loc-lint.mjs",
     "lint:dead": "knip",
-    "lint:rust": "cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "lint:rust": "cargo clippy --workspace --all-targets --locked -- -D warnings && cargo clippy --workspace --exclude opendrive-app --lib --no-deps --locked -- -D unused-crate-dependencies && cargo clippy -p opendrive-app --all-targets --features tray --locked -- -D warnings",
     "test:scripts": "node --test scripts/test/*.test.mjs",
     "test:coverage:node": "node scripts/test-coverage-node.mjs",
     "test:coverage:rust": "node scripts/test-coverage-rust.mjs",
@@ -22,6 +22,7 @@
     "@types/node": "^26.6.6",
     "c8": "^12.0.0",
     "knip": "^6.45.1",
+    "oxlint": "^1.95.0",
     "prettier": "^3.10.1"
   },
   "overrides": {

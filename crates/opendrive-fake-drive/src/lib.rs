@@ -19,7 +19,7 @@ pub struct FakeDrive {
     change_token: Mutex<u64>,
     changes: Mutex<Vec<FakeChange>>,
     sessions: Mutex<HashMap<String, UploadSession>>,
-    next_seq: Mutex<u64>,
+    pub(crate) next_seq: Mutex<u64>,
     error_queue: Mutex<VecDeque<u16>>,
     forced_error: Mutex<Option<u16>>,
     pub(crate) extras: Mutex<FakeExtras>,
@@ -75,12 +75,21 @@ impl FakeDrive {
     }
 
     pub fn list_children(&self, parent: &str) -> Vec<FakeFile> {
+        let root_real = self.root_real_id();
+        let is_root = parent == "root" || root_real.as_deref() == Some(parent);
         let mut out: Vec<_> = self
             .files
             .lock()
             .unwrap()
             .values()
-            .filter(|f| f.parents.iter().any(|p| p == parent) && !f.trashed)
+            .filter(|f| {
+                !f.trashed
+                    && f.parents.iter().any(|p| {
+                        p == parent
+                            || (is_root
+                                && (p == "root" || root_real.as_deref() == Some(p.as_str())))
+                    })
+            })
             .cloned()
             .collect();
         out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -91,7 +100,7 @@ impl FakeDrive {
         self.files.lock().unwrap().get(id).cloned()
     }
 
-    fn record_change(&self, file_id: String, removed: bool, file: Option<FakeFile>) {
+    pub(crate) fn record_change(&self, file_id: String, removed: bool, file: Option<FakeFile>) {
         let mut tok = self.change_token.lock().unwrap();
         let at = *tok;
         *tok += 1;

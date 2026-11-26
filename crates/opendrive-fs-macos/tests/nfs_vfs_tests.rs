@@ -199,4 +199,101 @@ async fn nfs_vfs_and_backend_propagate_engine_io_errors() {
     assert!(backend.getattr_meta(999).await.is_err());
     assert!(backend.read(999, 0, 4).await.is_err());
     assert!(backend.write(999, 0, b"x").await.is_err());
+
+    let fe: &dyn VfsEngine = &FailingEngine;
+    assert!(fe.stat(1).await.is_err());
+    assert!(fe.read(1, 0, 1).await.is_err());
+    assert_eq!(fe.open_write(3).await.unwrap().node, 3);
+    assert!(fe.rename(1, 1, OsStr::new("x")).await.is_err());
+    assert!(fe.remove(1).await.is_err());
+    fe.set_pinned(1, true).await.unwrap();
+    let _rx = fe.subscribe();
+    fe.add_account(Uuid::nil()).await.unwrap();
+    fe.remove_account(Uuid::nil()).await.unwrap();
+    assert_eq!(fe.stats().await.errors, 0);
+}
+
+struct LookupOkFailRestEngine;
+
+#[async_trait]
+impl VfsEngine for LookupOkFailRestEngine {
+    async fn list(&self, _: NodeId, _: Option<PageToken>) -> SyncResult<DirPage> {
+        Ok(DirPage {
+            entries: vec![],
+            next_page: None,
+        })
+    }
+    async fn lookup(&self, _: NodeId, name: &OsStr) -> SyncResult<Option<NodeAttr>> {
+        let id = if name == OsStr::new("bad") { 3 } else { 2 };
+        Ok(Some(NodeAttr {
+            id,
+            name: name.to_string_lossy().into_owned(),
+            kind: Kind::File,
+            size: 10,
+            modified_ms: 0,
+        }))
+    }
+    async fn stat(&self, node: NodeId) -> SyncResult<NodeAttr> {
+        if node == 2 {
+            Ok(NodeAttr {
+                id: 2,
+                name: "f".into(),
+                kind: Kind::File,
+                size: 10,
+                modified_ms: 0,
+            })
+        } else {
+            Err(SyncError::Io("stat err".into()))
+        }
+    }
+    async fn read(&self, _: NodeId, _: u64, _: u32) -> SyncResult<Bytes> {
+        Err(SyncError::Io("read err".into()))
+    }
+    async fn open_write(&self, node: NodeId) -> SyncResult<WriteHandle> {
+        Ok(WriteHandle { node })
+    }
+    async fn write(&self, _: NodeId, _: u64, _: &[u8]) -> SyncResult<u32> {
+        Ok(0)
+    }
+    async fn create(&self, _: NodeId, _: &OsStr, _: Kind) -> SyncResult<NodeAttr> {
+        Err(SyncError::Io("create err".into()))
+    }
+    async fn rename(&self, _: NodeId, _: NodeId, _: &OsStr) -> SyncResult<()> {
+        Err(SyncError::Io("rename err".into()))
+    }
+    async fn remove(&self, _: NodeId) -> SyncResult<()> {
+        Err(SyncError::Io("remove err".into()))
+    }
+    async fn set_pinned(&self, _: NodeId, _: bool) -> SyncResult<()> {
+        Ok(())
+    }
+    fn subscribe(&self) -> tokio::sync::mpsc::Receiver<EngineEvent> {
+        tokio::sync::mpsc::channel(1).1
+    }
+    async fn add_account(&self, _: AccountId) -> SyncResult<()> {
+        Ok(())
+    }
+    async fn remove_account(&self, _: AccountId) -> SyncResult<()> {
+        Ok(())
+    }
+    async fn stats(&self) -> EngineStats {
+        EngineStats {
+            transfers: 0,
+            queue_depth: 0,
+            errors: 0,
+        }
+    }
+}
+
+#[tokio::test]
+async fn nfs_backend_stat_read_remove_rename_engine_error_closures() {
+    let b = NfsBackend::new(Arc::new(LookupOkFailRestEngine));
+    let (fh_f, _, _) = b.lookup(1, "f").await.unwrap().unwrap();
+    let (fh_bad, _, _) = b.lookup(1, "bad").await.unwrap().unwrap();
+    assert!(b.getattr_meta(fh_bad).await.is_err());
+    assert!(<NfsBackend as NFSFileSystem>::read(&b, fh_f, 0, 4)
+        .await
+        .is_err());
+    assert!(b.remove(1, "f").await.is_err());
+    assert!(b.rename(1, "f", 1, "g").await.is_err());
 }

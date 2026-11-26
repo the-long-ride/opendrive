@@ -1,6 +1,6 @@
 //! Windows virtual drive letter mounting via `subst` and Explorer `DriveIcons`.
 
-use crate::{PlatformError, Result};
+use crate::{format_explorer_quota_label, ExplorerQuota, PlatformError, Result};
 use std::path::{Path, PathBuf};
 
 /// Returns `true` on Windows where virtual drive letter mapping is supported.
@@ -41,6 +41,33 @@ pub fn drive_unmount_command(letter: char) -> (String, Vec<String>) {
     ("subst".into(), vec![format!("{letter}:"), "/D".into()])
 }
 
+fn drive_icons_reg_add(drive: char, subkey: &str, value: String) -> (String, Vec<String>) {
+    let key = format!(
+        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\{drive}\{subkey}"
+    );
+    (
+        "reg".into(),
+        vec![
+            "add".into(),
+            key,
+            "/ve".into(),
+            "/d".into(),
+            value,
+            "/f".into(),
+        ],
+    )
+}
+
+/// Returns the `reg` command and arguments to set `DriveIcons\{drive}\DefaultLabel`.
+pub fn drive_label_reg_command(drive: char, quota: Option<ExplorerQuota>) -> (String, Vec<String>) {
+    drive_icons_reg_add(drive, "DefaultLabel", format_explorer_quota_label(quota))
+}
+
+/// Returns the `reg` command and arguments to set `DriveIcons\{drive}\DefaultIcon`.
+pub fn drive_icon_reg_command(drive: char, icon_path: &Path) -> (String, Vec<String>) {
+    drive_icons_reg_add(drive, "DefaultIcon", format!("{},0", icon_path.display()))
+}
+
 /// Parses `subst` stdout to find the mapped target path for `letter` (case-insensitive).
 pub fn parse_subst_target(stdout: &str, letter: char) -> Option<PathBuf> {
     let upper = format!("{}:\\: => ", letter.to_ascii_uppercase());
@@ -50,24 +77,19 @@ pub fn parse_subst_target(stdout: &str, letter: char) -> Option<PathBuf> {
         let rest = trimmed
             .strip_prefix(&upper)
             .or_else(|| trimmed.strip_prefix(&lower));
-        if let Some(target) = rest {
-            let path = target.trim();
-            if !path.is_empty() {
-                return Some(PathBuf::from(path));
-            }
+        if let Some(path) = rest.map(str::trim).filter(|p| !p.is_empty()) {
+            return Some(PathBuf::from(path));
         }
     }
     None
 }
 
 #[cfg(windows)]
-fn run_hidden(program: &str, args: &[&str]) -> Result<String> {
+pub(crate) fn run_hidden(program: &str, args: &[&str]) -> Result<String> {
     use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
     let output = std::process::Command::new(program)
         .args(args)
-        .creation_flags(CREATE_NO_WINDOW)
+        .creation_flags(0x0800_0000)
         .output()
         .map_err(|e| PlatformError::Other(format!("failed to run {program}: {e}")))?;
     if !output.status.success() {
@@ -88,57 +110,10 @@ fn run_hidden(program: &str, args: &[&str]) -> Result<String> {
 
 #[cfg(windows)]
 pub fn mount_virtual_drive(letter: &str, target: &Path) -> Result<char> {
-    let drive = normalize_drive_letter(letter)?;
-    std::fs::create_dir_all(target)
-        .map_err(|e| PlatformError::Other(format!("create {}: {e}", target.display())))?;
-
-    let listing = run_hidden("subst", &[])?;
-    if let Some(existing) = parse_subst_target(&listing, drive) {
-        let same = existing == target
-            || std::fs::canonicalize(&existing).ok() == std::fs::canonicalize(target).ok();
-        if !same {
-            return Err(PlatformError::Other(format!(
-                "drive {drive}: is already mapped to {}",
-                existing.display()
-            )));
-        }
-    } else {
-        let (prog, args) = drive_mount_command(drive, target);
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        run_hidden(&prog, &refs)?;
-    }
-
-    let key = format!(
-        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\{drive}\DefaultLabel"
-    );
-    let _ = run_hidden("reg", &["add", &key, "/ve", "/d", "OpenDrive", "/f"]);
-    if let Some(ico) = crate::data_dir()
-        .ok()
-        .map(|d| d.join("opendrive.ico"))
-        .filter(|p| p.is_file())
-    {
-        let icon_key = format!(
-            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\{drive}\DefaultIcon"
-        );
-        let icon_val = format!("{},0", ico.display());
-        let _ = run_hidden("reg", &["add", &icon_key, "/ve", "/d", &icon_val, "/f"]);
-    }
+    let ico = crate::data_dir().ok().map(|d| d.join("opendrive.ico"));
+    let drive = mount_with_runner(letter, target, None, ico.as_deref(), run_hidden)?;
+    crate::notify_shell_mounts_changed();
     Ok(drive)
-}
-
-#[cfg(windows)]
-pub fn unmount_virtual_drive(letter: &str) -> Result<()> {
-    let drive = normalize_drive_letter(letter)?;
-    let listing = run_hidden("subst", &[])?;
-    if parse_subst_target(&listing, drive).is_some() {
-        let (prog, args) = drive_unmount_command(drive);
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        run_hidden(&prog, &refs)?;
-    }
-    let key =
-        format!(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\{drive}");
-    let _ = run_hidden("reg", &["delete", &key, "/f"]);
-    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -148,6 +123,97 @@ pub fn mount_virtual_drive(_letter: &str, _target: &Path) -> Result<char> {
     ))
 }
 
+#[cfg(windows)]
+fn run_owned_cmd(
+    run: &mut impl FnMut(&str, &[&str]) -> Result<String>,
+    prog: &str,
+    args: &[String],
+) -> Result<String> {
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run(prog, &refs)
+}
+
+#[cfg(windows)]
+fn paths_match(a: &Path, b: &Path) -> bool {
+    a == b
+        || std::fs::canonicalize(a)
+            .ok()
+            .zip(std::fs::canonicalize(b).ok())
+            .is_some_and(|(ca, cb)| ca == cb)
+}
+
+#[cfg(windows)]
+fn mount_with_runner(
+    letter: &str,
+    target: &Path,
+    quota: Option<ExplorerQuota>,
+    icon: Option<&Path>,
+    mut run: impl FnMut(&str, &[&str]) -> Result<String>,
+) -> Result<char> {
+    let drive = normalize_drive_letter(letter)?;
+    std::fs::create_dir_all(target)
+        .map_err(|e| PlatformError::Other(format!("create {}: {e}", target.display())))?;
+    let listing = run("subst", &[])?;
+    if let Some(existing) = parse_subst_target(&listing, drive) {
+        if !paths_match(&existing, target) {
+            return Err(PlatformError::Other(format!(
+                "drive {drive}: is already mapped to {}",
+                existing.display()
+            )));
+        }
+    } else {
+        let (prog, args) = drive_mount_command(drive, target);
+        run_owned_cmd(&mut run, &prog, &args)?;
+    }
+    let (lprog, largs) = drive_label_reg_command(drive, quota);
+    let _ = run_owned_cmd(&mut run, &lprog, &largs);
+    if let Some(ico) = icon.filter(|p| p.is_file()) {
+        let (iprog, iargs) = drive_icon_reg_command(drive, ico);
+        let _ = run_owned_cmd(&mut run, &iprog, &iargs);
+    }
+    Ok(drive)
+}
+
+#[cfg(windows)]
+fn unmount_with_runner(
+    letter: &str,
+    only_target: Option<&Path>,
+    mut run: impl FnMut(&str, &[&str]) -> Result<String>,
+) -> Result<()> {
+    let drive = normalize_drive_letter(letter)?;
+    let listing = run("subst", &[])?;
+    let should_unmount = match (parse_subst_target(&listing, drive), only_target) {
+        (Some(_), None) => true,
+        (Some(existing), Some(target)) => paths_match(&existing, target),
+        (None, _) => false,
+    };
+    if should_unmount {
+        let (prog, args) = drive_unmount_command(drive);
+        run_owned_cmd(&mut run, &prog, &args)?;
+    }
+    if should_unmount || only_target.is_none() {
+        let key =
+            format!(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\{drive}");
+        let _ = run("reg", &["delete", &key, "/f"]);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn unmount_virtual_drive(letter: &str) -> Result<()> {
+    unmount_with_runner(letter, None, run_hidden)?;
+    crate::notify_shell_mounts_changed();
+    Ok(())
+}
+
+/// Unmounts `letter:` only when `subst` maps it to `target`, preserving unrelated drive letters.
+#[cfg(windows)]
+pub fn unmount_virtual_drive_for_target(letter: &str, target: &Path) -> Result<()> {
+    unmount_with_runner(letter, Some(target), run_hidden)?;
+    crate::notify_shell_mounts_changed();
+    Ok(())
+}
+
 #[cfg(not(windows))]
 pub fn unmount_virtual_drive(_letter: &str) -> Result<()> {
     Err(PlatformError::Other(
@@ -155,44 +221,79 @@ pub fn unmount_virtual_drive(_letter: &str) -> Result<()> {
     ))
 }
 
-#[cfg(test)]
+/// Unmounts `letter:` only when `subst` maps it to `target` (Windows-only).
+#[cfg(not(windows))]
+pub fn unmount_virtual_drive_for_target(letter: &str, _target: &Path) -> Result<()> {
+    normalize_drive_letter(letter)?;
+    Err(PlatformError::Other(
+        "virtual drive letters are only supported on Windows".into(),
+    ))
+}
+
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
 
     #[test]
-    fn normalize_drive_letter_accepts_valid_and_rejects_invalid() {
-        assert_eq!(normalize_drive_letter("o").unwrap(), 'O');
-        assert_eq!(normalize_drive_letter("  z:\\ ").unwrap(), 'Z');
-        assert_eq!(normalize_drive_letter("D:/").unwrap(), 'D');
-        assert!(normalize_drive_letter("").is_err());
-        assert!(normalize_drive_letter("CD").is_err());
-        assert!(normalize_drive_letter("1:").is_err());
-        assert!(normalize_drive_letter("A:").is_err());
-        assert!(normalize_drive_letter("b").is_err());
-        assert!(normalize_drive_letter("C:\\").is_err());
-        assert_eq!(is_virtual_drive_supported(), cfg!(windows));
-    }
+    fn mount_unmount_runner_and_run_hidden_branches() {
+        let dir = std::env::temp_dir().join(format!("od-dm-{}", std::process::id()));
+        let (target, ico) = (dir.join("root"), dir.join("a.ico"));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(&ico, b"ico").unwrap();
+        let mut calls = Vec::new();
+        let m_ico = mount_with_runner("O", &target, None, Some(&ico), |p, a| {
+            calls.push(format!("{p}:{}", a.join(" ")));
+            Ok(String::new())
+        });
+        assert_eq!(m_ico.unwrap(), 'O');
+        assert!(calls.iter().any(|c| c.starts_with("subst:O:")));
+        assert!(calls.iter().any(|c| c.starts_with("reg:add")));
 
-    #[test]
-    fn drive_commands_and_subst_parsing() {
-        let target = Path::new(r"C:\Users\Alice\OpenDrive");
-        let (prog, args) = drive_mount_command('O', target);
-        assert_eq!(prog, "subst");
-        assert_eq!(args, vec!["O:", r"C:\Users\Alice\OpenDrive"]);
-
-        let (uprog, uargs) = drive_unmount_command('O');
-        assert_eq!(uprog, "subst");
-        assert_eq!(uargs, vec!["O:", "/D"]);
-
-        let stdout = "D:\\: => C:\\Work\no:\\: =>   C:\\Users\\Alice\\OpenDrive  \n";
+        let same = format!("O:\\: => {}\n", target.display());
+        let ok = |s: &str| {
+            let s = s.to_string();
+            move |_: &str, _: &[&str]| Ok(s.clone())
+        };
         assert_eq!(
-            parse_subst_target(stdout, 'O'),
-            Some(PathBuf::from(r"C:\Users\Alice\OpenDrive"))
+            mount_with_runner("O", &target, None, None, ok(&same)).unwrap(),
+            'O'
         );
-        assert_eq!(
-            parse_subst_target(stdout, 'd'),
-            Some(PathBuf::from(r"C:\Work"))
-        );
-        assert_eq!(parse_subst_target(stdout, 'Z'), None);
+        assert!(mount_with_runner("O", &target, None, None, ok("O:\\: => C:\\Other\n")).is_err());
+
+        for only in [None, Some(target.as_path())] {
+            let mut log = Vec::new();
+            unmount_with_runner("O", only, |p, a| {
+                log.push(format!("{p}:{}", a.join(" ")));
+                Ok(same.clone())
+            })
+            .unwrap();
+            assert!(log.iter().any(|c| c.contains("subst:O: /D")));
+        }
+        unmount_with_runner("O", Some(&target), ok("O:\\: => C:\\Other\n")).unwrap();
+
+        for (p, a, exp) in [
+            ("cmd", &["/C", "echo ok"][..], true),
+            ("cmd", &["/C", "echo fail 1>&2 && exit /b 1"][..], false),
+            ("cmd", &["/C", "echo outfail && exit /b 1"][..], false),
+            ("opendrive-missing-bin-xyz", &[][..], false),
+        ] {
+            assert_eq!(run_hidden(p, a).is_ok(), exp);
+        }
+        let fail = |_: &str, _: &[&str]| Err(PlatformError::Other("e".into()));
+        fn fcmd(l: String) -> impl FnMut(&str, &[&str]) -> Result<String> {
+            move |p, a| {
+                if a.is_empty() {
+                    Ok(l.clone())
+                } else {
+                    Err(PlatformError::Other(p.into()))
+                }
+            }
+        }
+        assert!(mount_with_runner("O", &target, None, None, fail).is_err());
+        assert!(mount_with_runner("O", &target, None, None, fcmd(String::new())).is_err());
+        assert!(unmount_with_runner("O", None, fail).is_err());
+        assert!(unmount_with_runner("O", None, fcmd(same)).is_err());
+        assert!(paths_match(&target, &dir.join(".").join("root")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

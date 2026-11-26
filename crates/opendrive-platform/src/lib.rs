@@ -1,11 +1,23 @@
 //! Autostart, paths, notifications, single-instance, tray.
 
 mod drive_mount;
+mod explorer_quota;
+mod mount_cleanup;
 mod tray;
 
 pub use drive_mount::{
-    drive_mount_command, drive_unmount_command, is_virtual_drive_supported, mount_virtual_drive,
-    normalize_drive_letter, parse_subst_target, unmount_virtual_drive,
+    drive_icon_reg_command, drive_label_reg_command, drive_mount_command, drive_unmount_command,
+    is_virtual_drive_supported, mount_virtual_drive, normalize_drive_letter, parse_subst_target,
+    unmount_virtual_drive, unmount_virtual_drive_for_target,
+};
+pub use explorer_quota::{
+    build_launch_invocation, build_this_pc_reg_commands, compute_explorer_quota,
+    format_bytes_compact, format_explorer_quota_label, format_explorer_tile_comment,
+    launch_with_app, sync_this_pc_namespace, ExplorerQuota,
+};
+pub use mount_cleanup::{
+    install_console_cleanup_handler, is_process_alive, notify_shell_mounts_changed,
+    spawn_detached_background, wait_for_process_exit,
 };
 pub use tray::{default_menu, desktop_tray_menu, show_tray_stub, TrayMenuItem};
 
@@ -107,12 +119,19 @@ pub fn notify(title: &str, body: &str) -> Result<()> {
 }
 
 pub fn open_path(path: &str) -> Result<()> {
+    if path.trim().is_empty() {
+        return Err(PlatformError::Other("empty path".into()));
+    }
     open::that(path).map_err(|e| PlatformError::Other(e.to_string()))
 }
 
 /// Open a Google-native Doc/Sheet/Slide in the browser.
 pub fn open_drive_file(file_id: &str) -> Result<()> {
-    let url = format!("https://drive.google.com/open?id={file_id}");
+    let trimmed = file_id.trim();
+    if trimmed.is_empty() {
+        return Err(PlatformError::Other("empty file id".into()));
+    }
+    let url = format!("https://drive.google.com/open?id={trimmed}");
     open_path(&url)
 }
 
@@ -178,5 +197,14 @@ mod tests {
         assert!(acquire_instance_lock(&blocker.join("child.lock")).is_err());
         assert!(acquire_instance_lock(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn open_path_and_open_drive_file_reject_empty_inputs() {
+        assert!(open_path("").is_err());
+        assert!(open_path("   \t").is_err());
+        assert!(open_drive_file("").is_err());
+        assert!(open_drive_file("   ").is_err());
+        assert_ne!(TrayAction::Summary, TrayAction::Quit);
     }
 }

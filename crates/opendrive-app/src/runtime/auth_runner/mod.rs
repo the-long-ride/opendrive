@@ -1,71 +1,25 @@
 //! Background OAuth loopback + PKCE and Service Account JWT authentication runners.
 
 mod complete;
+mod endpoints;
+
+pub use endpoints::{AuthEndpoints, BrowserOpener, ItemLauncher, MultiFilePicker, VaultFilePicker};
 
 use crate::design::formatters::ConnectAuthMode;
 use crate::runtime::bridge::{AppStateResponse, Bridge};
-use crate::runtime::release_check::GITHUB_LATEST_RELEASE_URL;
 use eframe::egui;
 use opendrive_auth::{
     bind_loopback, generate_pkce, random_state, wait_for_redirect, AuthClient, ServiceAccountKey,
-    AUTH_URL, DEFAULT_TOKEN_URI, TOKEN_URL,
+    DEFAULT_TOKEN_URI,
 };
 use opendrive_drive::DriveClient;
 use std::future::Future;
-use std::path::PathBuf;
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 pub(crate) const GOOGLE_DRIVE_API_BASE: &str = "https://www.googleapis.com/drive/v3";
 pub(crate) const GOOGLE_DRIVE_UPLOAD_BASE: &str = "https://www.googleapis.com/upload/drive/v3";
-
-pub type BrowserOpener = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
-pub type VaultFilePicker = Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>;
-
-#[derive(Clone)]
-pub struct AuthEndpoints {
-    pub auth_url: String,
-    pub token_url: String,
-    pub drive_api_base: String,
-    pub drive_upload_base: String,
-    pub redirect_timeout_secs: u64,
-    pub browser_opener: BrowserOpener,
-    pub folder_opener: BrowserOpener,
-    pub vault_save_picker: VaultFilePicker,
-    pub vault_open_picker: VaultFilePicker,
-    pub release_api_url: String,
-}
-
-impl Default for AuthEndpoints {
-    fn default() -> Self {
-        Self {
-            auth_url: AUTH_URL.to_string(),
-            token_url: TOKEN_URL.to_string(),
-            drive_api_base: GOOGLE_DRIVE_API_BASE.to_string(),
-            drive_upload_base: GOOGLE_DRIVE_UPLOAD_BASE.to_string(),
-            redirect_timeout_secs: 180,
-            browser_opener: Arc::new(|url| {
-                opendrive_platform::open_path(url).map_err(|e| e.to_string())
-            }),
-            folder_opener: Arc::new(|path| {
-                opendrive_platform::open_path(path).map_err(|e| e.to_string())
-            }),
-            vault_save_picker: Arc::new(|| {
-                rfd::FileDialog::new()
-                    .add_filter("OpenDrive Encrypted Vault", &["odcred"])
-                    .set_file_name("opendrive-credentials.odcred")
-                    .save_file()
-            }),
-            vault_open_picker: Arc::new(|| {
-                rfd::FileDialog::new()
-                    .add_filter("OpenDrive Encrypted Vault", &["odcred"])
-                    .pick_file()
-            }),
-            release_api_url: GITHUB_LATEST_RELEASE_URL.to_string(),
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct OAuthStartParams {
@@ -108,14 +62,34 @@ pub struct AuthSession {
     pub auth_url: Option<String>,
     rx: mpsc::Receiver<AuthEvent>,
     cancel_tx: Option<oneshot::Sender<()>>,
+    finished: bool,
 }
 
 impl AuthSession {
     pub fn try_recv(&mut self) -> Option<AuthEvent> {
-        self.rx.try_recv().ok()
+        match self.rx.try_recv() {
+            Ok(ev) => {
+                if matches!(ev, AuthEvent::Completed { .. } | AuthEvent::Failed(_)) {
+                    self.finished = true;
+                }
+                Some(ev)
+            }
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                if self.finished {
+                    None
+                } else {
+                    self.finished = true;
+                    Some(AuthEvent::Failed(
+                        "Authentication session ended unexpectedly.".into(),
+                    ))
+                }
+            }
+        }
     }
 
     pub fn cancel(&mut self) {
+        self.finished = true;
         if let Some(tx) = self.cancel_tx.take() {
             let _ = tx.send(());
         }
@@ -175,6 +149,7 @@ where
         auth_url: None,
         rx,
         cancel_tx: Some(cancel_tx),
+        finished: false,
     }
 }
 
@@ -230,8 +205,9 @@ async fn run_browser_oauth(
         _ = &mut cancel_rx => return Ok(None),
         res = drive.about() => res.map_err(|e| e.to_string())?,
     };
-    let (acct_id, root_id, message) =
-        bridge.complete_oauth_account(&params, &refresh, &about, drive)?;
+    let (acct_id, root_id, message) = bridge
+        .complete_oauth_account(&params, &refresh, &about, drive)
+        .await?;
     let _ = bridge.engine().hydrate_folder(acct_id, root_id).await;
     Ok(Some((bridge.state_snapshot(), message)))
 }
@@ -260,8 +236,9 @@ async fn run_service_account(
         _ = &mut cancel_rx => return Ok(None),
         res = drive.about() => res.map_err(|e| e.to_string())?,
     };
-    let (acct_id, root_id, message) =
-        bridge.complete_service_account(&params, &raw_json, &about, drive)?;
+    let (acct_id, root_id, message) = bridge
+        .complete_service_account(&params, &raw_json, &about, drive)
+        .await?;
     let _ = bridge.engine().hydrate_folder(acct_id, root_id).await;
     Ok(Some((bridge.state_snapshot(), message)))
 }

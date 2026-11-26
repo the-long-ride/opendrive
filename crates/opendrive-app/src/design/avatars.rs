@@ -1,6 +1,10 @@
 //! Account avatar download, local file cache, and egui image decoding.
 
-use eframe::egui::{self, ColorImage, TextureHandle, TextureOptions};
+use crate::design::theme::ThemePalette;
+use eframe::egui::{
+    self, Color32, ColorImage, CornerRadius, FontId, Pos2, Rect, Sense, Stroke, StrokeKind,
+    TextureHandle, TextureOptions, Vec2,
+};
 use image::imageops::FilterType;
 use opendrive_core::Account;
 use opendrive_drive::DriveClient;
@@ -84,11 +88,11 @@ pub struct TotalStorageSummary {
     pub badge_text: String,
     pub detail_text: String,
     pub ratio: f32,
+    pub has_exact_total: bool,
 }
 
 pub fn summarize_total_storage(accounts: &[Account]) -> TotalStorageSummary {
     let used: u64 = accounts.iter().map(|a| a.storage_used).sum();
-    let quota: u64 = accounts.iter().map(|a| a.storage_quota).sum();
     let account_count = accounts.len();
     if account_count == 0 {
         return TotalStorageSummary {
@@ -98,9 +102,19 @@ pub fn summarize_total_storage(accounts: &[Account]) -> TotalStorageSummary {
             badge_text: "0 B used".into(),
             detail_text: "No accounts connected".into(),
             ratio: 0.0,
+            has_exact_total: false,
         };
     }
-    let ratio = if quota > 0 {
+    let has_exact_total = !accounts.is_empty()
+        && accounts
+            .iter()
+            .all(|a| a.storage_quota > 0 && a.storage_quota >= a.storage_used);
+    let quota: u64 = if has_exact_total {
+        accounts.iter().map(|a| a.storage_quota).sum()
+    } else {
+        0
+    };
+    let ratio = if has_exact_total && quota > 0 {
         (used as f32 / quota as f32).clamp(0.0, 1.0)
     } else {
         0.0
@@ -111,7 +125,7 @@ pub fn summarize_total_storage(accounts: &[Account]) -> TotalStorageSummary {
         "accounts"
     };
     let u = crate::design::formatters::format_bytes(used);
-    let (badge_text, detail_text) = if quota > 0 {
+    let (badge_text, detail_text) = if has_exact_total {
         let q = crate::design::formatters::format_bytes(quota);
         (
             format!("{u} / {q}"),
@@ -130,5 +144,53 @@ pub fn summarize_total_storage(accounts: &[Account]) -> TotalStorageSummary {
         badge_text,
         detail_text,
         ratio,
+        has_exact_total,
+    }
+}
+
+pub fn account_avatar(
+    ui: &mut egui::Ui,
+    pal: &ThemePalette,
+    texture: Option<&egui::TextureHandle>,
+    monogram: &str,
+    ring_color: Color32,
+    size: f32,
+) {
+    let small = size <= 32.0;
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
+    let p = ui.painter();
+    let (rad, shrink, irad, font_sz) = if small {
+        (7, 2.5, 5, 11.0)
+    } else {
+        (9, 3.0, 7, 13.5)
+    };
+    p.rect(
+        rect,
+        CornerRadius::same(rad),
+        ring_color,
+        Stroke::new(2.0, pal.tactile_ink),
+        StrokeKind::Inside,
+    );
+    let inner = rect.shrink(shrink);
+    if let Some(tex) = texture {
+        let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+        let shape =
+            egui::epaint::RectShape::filled(inner, CornerRadius::same(irad), Color32::WHITE)
+                .with_texture(tex.id(), uv);
+        p.add(egui::Shape::Rect(shape));
+        p.rect_stroke(
+            inner,
+            CornerRadius::same(irad),
+            Stroke::new(1.0, pal.tactile_ink),
+            StrokeKind::Inside,
+        );
+    } else {
+        p.rect_filled(inner, CornerRadius::same(irad), pal.card_bg);
+        let g = p.layout_no_wrap(
+            monogram.to_owned(),
+            FontId::proportional(font_sz),
+            pal.text_primary,
+        );
+        p.galley(inner.center() - g.size() * 0.5, g, pal.text_primary);
     }
 }

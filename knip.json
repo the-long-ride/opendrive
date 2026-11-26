@@ -2,5 +2,5 @@
   "$schema": "https://unpkg.com/knip@latest/schema.json",
   "entry": ["scripts/*.mjs!", "scripts/test/*.test.mjs!"],
   "project": ["scripts/**/*.mjs"],
-  "ignoreDependencies": ["c8"]
+  "ignoreDependencies": ["c8", "oxlint"]
 }

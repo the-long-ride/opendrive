@@ -1,12 +1,10 @@
-use super::render_alias_editor;
-use crate::design::formatters::{
-    derive_monogram, format_account_storage, join_mount_path, status_label, status_tone,
-};
+use super::{render_alias_editor, render_path_usage};
+use crate::design::formatters::{derive_monogram, join_mount_path, status_label, status_tone};
 use crate::design::theme::ThemePalette;
 use crate::design::widgets::{
     account_avatar, pill_button, status_pill, thin_usage_bar, ButtonVariant, IconKind,
 };
-use crate::design::widgets_controls::tactile_switch;
+use crate::design::widgets_controls::tactile_switch_tip;
 use crate::desktop::drawer::render_oauth_pending;
 use crate::desktop::UiAction;
 use crate::runtime::auth_runner::AuthSession;
@@ -14,11 +12,23 @@ use crate::runtime::bridge_types::AliasEditDraft;
 use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
 use opendrive_core::{default_account_alias, Account, AccountStatus};
 
+fn row_btn(
+    ui: &mut egui::Ui,
+    pal: &ThemePalette,
+    icon: IconKind,
+    label: &str,
+    variant: ButtonVariant,
+) -> bool {
+    pill_button(ui, pal, Some(icon), label, variant, true, true)
+}
+
 fn render_account_actions(
     ui: &mut egui::Ui,
     pal: &ThemePalette,
     acct: &Account,
     is_editing: bool,
+    is_pending: bool,
+    (idx, total): (usize, usize),
     actions: &mut Vec<UiAction>,
 ) {
     let is_paused = acct.status == AccountStatus::Paused || !acct.enabled;
@@ -29,6 +39,7 @@ fn render_account_actions(
     let id = acct.id.to_string();
 
     if needs_reauth {
+        let is_sa = acct.credential_set_id.is_nil();
         if pill_button(
             ui,
             pal,
@@ -36,134 +47,131 @@ fn render_account_actions(
             "Sign In",
             ButtonVariant::Primary,
             true,
-            true,
+            !(is_pending && is_sa),
         ) {
-            actions.push(UiAction::ReauthAccount {
-                id: id.clone(),
-                open_browser: true,
-                copy_link: false,
-            });
-        }
-        if pill_button(
-            ui,
-            pal,
-            Some(IconKind::Copy),
-            "Copy Link",
-            ButtonVariant::TactilePill,
-            true,
-            true,
-        ) {
-            actions.push(UiAction::ReauthAccount {
-                id: id.clone(),
-                open_browser: false,
-                copy_link: true,
-            });
-        }
-    }
-    if tactile_switch(ui, pal, !is_paused, true) {
-        actions.push(UiAction::AccountAction {
-            action: if is_paused { "resume" } else { "pause" },
-            id: Some(id.clone()),
-        });
-    }
-    ui.label(
-        RichText::new(if is_paused { "Paused" } else { "Sync On" })
-            .size(11.5)
-            .strong()
-            .color(if is_paused {
-                pal.text_muted
+            actions.push(if is_pending {
+                UiAction::OpenAuthBrowser
             } else {
-                pal.text_primary
-            }),
-    );
+                UiAction::ReauthAccount {
+                    id: id.clone(),
+                    open_browser: true,
+                    copy_link: false,
+                }
+            });
+        }
+        if !is_sa
+            && row_btn(
+                ui,
+                pal,
+                IconKind::Copy,
+                "Copy Link",
+                ButtonVariant::TactilePill,
+            )
+        {
+            actions.push(if is_pending {
+                UiAction::CopyAuthLink
+            } else {
+                UiAction::ReauthAccount {
+                    id: id.clone(),
+                    open_browser: false,
+                    copy_link: true,
+                }
+            });
+        }
+    }
+    let (sync_tip, sync_lbl, sync_col) = if is_paused {
+        (
+            "Sync paused for this account (click to resume)",
+            "Paused",
+            pal.text_muted,
+        )
+    } else {
+        (
+            "Sync active for this account (click to pause)",
+            "Sync On",
+            pal.text_primary,
+        )
+    };
+    ui.horizontal(|ui| {
+        if tactile_switch_tip(ui, pal, !is_paused, true, sync_tip) {
+            actions.push(UiAction::AccountAction {
+                action: if is_paused { "resume" } else { "pause" },
+                id: Some(id.clone()),
+            });
+        }
+        ui.label(RichText::new(sync_lbl).size(11.5).strong().color(sync_col));
+    });
+
     let (ro_icon, ro_lbl) = if acct.read_only {
         (IconKind::Lock, "Read-Only")
     } else {
         (IconKind::Unlock, "Read-Write")
     };
-    if pill_button(
-        ui,
-        pal,
-        Some(ro_icon),
-        ro_lbl,
-        ButtonVariant::Toggle {
-            selected: acct.read_only,
-        },
-        true,
-        true,
-    ) {
+    let ro_var = ButtonVariant::Toggle {
+        selected: acct.read_only,
+    };
+    if row_btn(ui, pal, ro_icon, ro_lbl, ro_var) {
         actions.push(UiAction::AccountAction {
             action: "toggle_readonly",
             id: Some(id.clone()),
         });
     }
-    if pill_button(
-        ui,
-        pal,
-        Some(IconKind::Edit),
-        "Alias",
-        ButtonVariant::Toggle {
-            selected: is_editing,
-        },
-        true,
-        true,
-    ) {
+    let alias_var = ButtonVariant::Toggle {
+        selected: is_editing,
+    };
+    if row_btn(ui, pal, IconKind::Edit, "Alias", alias_var) {
         if is_editing {
             actions.push(UiAction::CancelAlias);
         } else {
             actions.push(UiAction::StartEditAlias(id.clone()));
         }
     }
-    if pill_button(
-        ui,
-        pal,
-        Some(IconKind::Trash),
-        "Remove",
-        ButtonVariant::Danger,
-        true,
-        true,
-    ) {
+    if row_btn(ui, pal, IconKind::Trash, "Remove", ButtonVariant::Danger) {
         actions.push(UiAction::AccountAction {
             action: "remove",
-            id: Some(id),
+            id: Some(id.clone()),
         });
+    }
+    if total > 1 {
+        for (icon, act, en) in [
+            (IconKind::ChevronUp, "move_up", idx > 0),
+            (IconKind::ChevronDown, "move_down", idx + 1 < total),
+        ] {
+            if pill_button(ui, pal, Some(icon), "", ButtonVariant::Default, true, en) {
+                actions.push(UiAction::AccountAction {
+                    action: act,
+                    id: Some(id.clone()),
+                });
+            }
+        }
     }
 }
 
-fn render_path_usage(
+fn render_header_right(
     ui: &mut egui::Ui,
     pal: &ThemePalette,
+    acct: &Account,
     path: &str,
-    used: u64,
-    quota: u64,
     actions: &mut Vec<UiAction>,
 ) {
-    ui.horizontal_wrapped(|ui| {
-        if pill_button(
-            ui,
-            pal,
-            Some(IconKind::Folder),
-            "Open",
-            ButtonVariant::Default,
-            true,
-            true,
-        ) {
-            actions.push(UiAction::OpenAccountFolder(path.to_owned()));
-        }
-        ui.label(
-            RichText::new(path)
-                .size(12.0)
-                .monospace()
-                .color(pal.text_muted),
-        );
-        if let Some(quota_lbl) = format_account_storage(used, quota) {
-            ui.label(
-                RichText::new(format!("· {quota_lbl}"))
-                    .size(12.0)
-                    .color(pal.text_muted),
-            );
-        }
-    });
+    status_pill(
+        ui,
+        pal,
+        status_label(&acct.status),
+        status_tone(&acct.status),
+    );
+    if row_btn(ui, pal, IconKind::Folder, "Open", ButtonVariant::Default) {
+        actions.push(UiAction::OpenAccountFolder(path.to_owned()));
+    }
+    if row_btn(
+        ui,
+        pal,
+        IconKind::Explore,
+        "Explore",
+        ButtonVariant::Primary,
+    ) {
+        actions.push(UiAction::OpenExplorer(acct.id.to_string()));
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -171,7 +179,7 @@ pub(super) fn render_account_row(
     ui: &mut egui::Ui,
     pal: &ThemePalette,
     acct: &Account,
-    idx: usize,
+    (idx, total): (usize, usize),
     mount_root: &str,
     avatar: Option<&egui::TextureHandle>,
     alias_edit: &mut Option<AliasEditDraft>,
@@ -201,14 +209,10 @@ pub(super) fn render_account_row(
         .inner_margin(Margin::same(14))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            let narrow = ui.available_width() < 760.0;
             ui.horizontal(|ui| {
-                account_avatar(ui, pal, avatar, &monogram, ring);
+                account_avatar(ui, pal, avatar, &monogram, ring, 42.0);
                 ui.add_space(6.0);
-                let narrow_hdr = ui.available_width() < 420.0;
-                let pill_lbl = status_label(&acct.status);
-                let pill_tone = status_tone(&acct.status);
-                if narrow_hdr {
+                if ui.available_width() < 560.0 {
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             ui.label(
@@ -218,7 +222,7 @@ pub(super) fn render_account_row(
                                     .color(pal.text_primary),
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                status_pill(ui, pal, pill_lbl, pill_tone);
+                                render_header_right(ui, pal, acct, &path, actions);
                             });
                         });
                         ui.label(RichText::new(email).size(12.5).color(pal.text_muted));
@@ -232,32 +236,17 @@ pub(super) fn render_account_row(
                     );
                     ui.label(RichText::new(email).size(12.5).color(pal.text_muted));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        status_pill(ui, pal, pill_lbl, pill_tone);
+                        render_header_right(ui, pal, acct, &path, actions);
                     });
                 }
             });
 
             ui.add_space(8.0);
-            if narrow {
-                ui.horizontal_wrapped(|ui| {
-                    render_account_actions(ui, pal, acct, is_editing, actions)
-                });
-            } else {
-                ui.horizontal(|ui| {
-                    render_account_actions(ui, pal, acct, is_editing, actions);
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        render_path_usage(
-                            ui,
-                            pal,
-                            &path,
-                            acct.storage_used,
-                            acct.storage_quota,
-                            actions,
-                        );
-                    });
-                });
-            }
-
+            let pending = row_pending.is_some();
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.y = 6.0;
+                render_account_actions(ui, pal, acct, is_editing, pending, (idx, total), actions);
+            });
             if is_editing {
                 if let Some(edit) = alias_edit.as_mut() {
                     ui.add_space(8.0);
@@ -268,19 +257,10 @@ pub(super) fn render_account_row(
                 ui.add_space(8.0);
                 render_oauth_pending(ui, pal, session, actions);
             }
-            if narrow {
+            ui.add_space(8.0);
+            render_path_usage(ui, pal, &path, acct.storage_used, acct.storage_quota);
+            if acct.storage_quota > 0 && acct.storage_quota >= acct.storage_used {
                 ui.add_space(6.0);
-                render_path_usage(
-                    ui,
-                    pal,
-                    &path,
-                    acct.storage_used,
-                    acct.storage_quota,
-                    actions,
-                );
-            }
-            if acct.storage_quota > 0 {
-                ui.add_space(8.0);
                 let ratio = (acct.storage_used as f32 / acct.storage_quota as f32).clamp(0.0, 1.0);
                 thin_usage_bar(ui, pal, ratio);
             }

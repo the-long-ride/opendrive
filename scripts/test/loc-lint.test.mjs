@@ -13,13 +13,13 @@ function runGit(cwd, args) {
   assert.equal(result.status, 0, result.stderr);
 }
 
-test('LOC lint reports tracked oversized source with its configured limit', () => {
+test('LOC lint reports tracked and untracked oversized source with its configured limit', () => {
   const cwd = mkdtempSync(path.join(tmpdir(), 'loc-lint-'));
   mkdirSync(path.join(cwd, 'src'));
   writeFileSync(path.join(cwd, 'src', 'big.tsx'), 'export const x = 1;\n'.repeat(351));
   writeFileSync(path.join(cwd, 'src', 'big.rs'), 'pub const X: i32 = 1;\n'.repeat(301));
   runGit(cwd, ['init', '-q']);
-  runGit(cwd, ['add', 'src/big.tsx', 'src/big.rs']);
+  runGit(cwd, ['add', 'src/big.tsx']);
 
   const result = spawnSync(process.execPath, [lintScript], {
     cwd,
@@ -31,12 +31,13 @@ test('LOC lint reports tracked oversized source with its configured limit', () =
   assert.match(result.stderr, /src\/big\.rs: 301 lines \(limit 300\)/);
 });
 
-test('LOC lint ignores untracked, generated, and resource files (.resx, .json, .csv, .db)', () => {
+test('LOC lint ignores gitignored, generated, and resource files (.resx, .json, .csv, .db)', () => {
   const cwd = mkdtempSync(path.join(tmpdir(), 'loc-lint-'));
   mkdirSync(path.join(cwd, 'src'));
   mkdirSync(path.join(cwd, 'dist'));
+  writeFileSync(path.join(cwd, '.gitignore'), 'src/ignored.js\n');
   writeFileSync(path.join(cwd, 'src', 'ok.ts'), 'export const ok = true;\n');
-  writeFileSync(path.join(cwd, 'src', 'untracked.js'), 'const x = 1;\n'.repeat(351));
+  writeFileSync(path.join(cwd, 'src', 'ignored.js'), 'const x = 1;\n'.repeat(351));
   writeFileSync(path.join(cwd, 'dist', 'generated.js'), 'const x = 1;\n'.repeat(351));
   writeFileSync(path.join(cwd, 'src', 'Strings.resx'), '<root>\n'.repeat(1000));
   writeFileSync(path.join(cwd, 'src', 'data.json'), '{\n'.repeat(1000));
@@ -45,6 +46,7 @@ test('LOC lint ignores untracked, generated, and resource files (.resx, .json, .
   runGit(cwd, ['init', '-q']);
   runGit(cwd, [
     'add',
+    '.gitignore',
     'src/ok.ts',
     'dist/generated.js',
     'src/Strings.resx',

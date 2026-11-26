@@ -2,6 +2,7 @@
 
 use crate::limiter::BandwidthLimiter;
 use crate::staging::StagingDir;
+use crate::stream_cache::StreamCache;
 use crate::{EngineEvent, Kind, NodeAttr, NodeId, Result, SyncError};
 use opendrive_drive::DriveClient;
 use opendrive_store::{Node, NodeState, Store};
@@ -18,11 +19,13 @@ pub const SHARED_WITH_ME_DRIVE_ID: &str = "sharedWithMe";
 pub struct SyncEngine {
     pub(crate) store: Arc<Mutex<Store>>,
     pub(crate) clients: Mutex<HashMap<Uuid, DriveClient>>,
+    pub(crate) root_drive_ids: Mutex<HashMap<Uuid, String>>,
     pub(crate) events: Mutex<Option<mpsc::Sender<EngineEvent>>>,
     pub(crate) staging: Mutex<Option<StagingDir>>,
-    pub(crate) limiter: BandwidthLimiter,
-    pub(crate) transfers: AtomicU64,
-    pub(crate) errors: AtomicU64,
+    pub(crate) stream_cache: Arc<StreamCache>,
+    pub(crate) limiter: Arc<BandwidthLimiter>,
+    pub(crate) transfers: Arc<AtomicU64>,
+    pub(crate) errors: Arc<AtomicU64>,
 }
 
 impl SyncEngine {
@@ -30,11 +33,13 @@ impl SyncEngine {
         Self {
             store: Arc::new(Mutex::new(store)),
             clients: Mutex::new(HashMap::new()),
+            root_drive_ids: Mutex::new(HashMap::new()),
             events: Mutex::new(None),
             staging: Mutex::new(None),
-            limiter: BandwidthLimiter::new(None),
-            transfers: AtomicU64::new(0),
-            errors: AtomicU64::new(0),
+            stream_cache: Arc::new(StreamCache::new()),
+            limiter: Arc::new(BandwidthLimiter::new(None)),
+            transfers: Arc::new(AtomicU64::new(0)),
+            errors: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -54,6 +59,10 @@ impl SyncEngine {
 
     pub fn store(&self) -> &Arc<Mutex<Store>> {
         &self.store
+    }
+
+    pub fn get_node(&self, node_id: NodeId) -> Result<Option<Node>> {
+        self.store.lock().get_node(node_id as i64).map_err(sync_err)
     }
 
     pub fn drive_client_for(&self, account_id: Uuid) -> Result<DriveClient> {
@@ -94,142 +103,6 @@ impl SyncEngine {
             })
             .map_err(|e| SyncError::Other(e.to_string()))?;
         Ok(id as NodeId)
-    }
-
-    pub async fn hydrate_folder(&self, account_id: Uuid, parent_node: NodeId) -> Result<()> {
-        let drive_parent = {
-            let store = self.store.lock();
-            store
-                .get_node(parent_node as i64)
-                .map_err(|e| SyncError::Other(e.to_string()))?
-                .ok_or(SyncError::NotFound)?
-                .drive_id
-                .clone()
-        };
-        let client = self.drive_client_for(account_id)?;
-        let mut all_files = Vec::new();
-        let mut page_token: Option<String> = None;
-        loop {
-            let list = if drive_parent == SHARED_WITH_ME_DRIVE_ID {
-                client
-                    .list_shared_with_me(page_token.as_deref())
-                    .await
-                    .map_err(sync_err)?
-            } else {
-                client
-                    .list_files(&drive_parent, page_token.as_deref(), true)
-                    .await
-                    .map_err(sync_err)?
-            };
-            all_files.extend(list.files);
-            match list.next_page_token {
-                Some(tok) if !tok.is_empty() => page_token = Some(tok),
-                _ => break,
-            }
-        }
-        let store = self.store.lock();
-        if drive_parent == "root"
-            && store
-                .find_by_drive_id(account_id, SHARED_WITH_ME_DRIVE_ID)
-                .map_err(sync_err)?
-                .is_none()
-        {
-            let swm_id = store.next_id().map_err(sync_err)?;
-            store
-                .upsert_node(&Node {
-                    id: swm_id,
-                    account_id,
-                    drive_id: SHARED_WITH_ME_DRIVE_ID.into(),
-                    parent_id: Some(parent_node as i64),
-                    name: "Shared with me".into(),
-                    display_name: "Shared with me".into(),
-                    kind: "folder".into(),
-                    mime: Some("application/vnd.google-apps.folder".into()),
-                    size: 0,
-                    md5: None,
-                    modified_ms: 0,
-                    head_revision: None,
-                    trashed: false,
-                    shared_drive_id: None,
-                    state: NodeState::Placeholder,
-                    pinned: false,
-                    last_access_ms: 0,
-                })
-                .map_err(sync_err)?;
-        }
-        for f in all_files {
-            let (effective_id, effective_mime) =
-                if f.mime_type == "application/vnd.google-apps.shortcut" {
-                    match f.shortcut_target_id.filter(|s| !s.is_empty()) {
-                        Some(tid) => (tid, f.shortcut_target_mime.unwrap_or(f.mime_type)),
-                        None => (f.id, f.mime_type),
-                    }
-                } else {
-                    (f.id, f.mime_type)
-                };
-            let kind = if effective_mime == "application/vnd.google-apps.folder" {
-                "folder"
-            } else if effective_mime == "application/vnd.google-apps.shortcut" {
-                "shortcut"
-            } else if opendrive_drive::is_native_google_doc(&effective_mime) {
-                "native_doc"
-            } else {
-                "file"
-            };
-            let id = match store.find_by_drive_id(account_id, &effective_id) {
-                Ok(Some(existing)) => existing.id,
-                _ => store.next_id().map_err(sync_err)?,
-            };
-            store
-                .upsert_node(&Node {
-                    id,
-                    account_id,
-                    drive_id: effective_id,
-                    parent_id: Some(parent_node as i64),
-                    name: f.name.clone(),
-                    display_name: f.name,
-                    kind: kind.into(),
-                    mime: Some(effective_mime),
-                    size: f.size.unwrap_or(0) as i64,
-                    md5: f.md5,
-                    modified_ms: 0,
-                    head_revision: f.head_revision_id,
-                    trashed: f.trashed,
-                    shared_drive_id: None,
-                    state: NodeState::Placeholder,
-                    pinned: false,
-                    last_access_ms: 0,
-                })
-                .map_err(sync_err)?;
-        }
-        Ok(())
-    }
-
-    pub fn placeholder_folder_rel_paths(&self, root_node: NodeId) -> Vec<PathBuf> {
-        let store = self.store.lock();
-        let mut out = Vec::new();
-        let mut stack = vec![(root_node as i64, PathBuf::new())];
-        while let Some((pid, rel)) = stack.pop() {
-            let Ok(children) = store.list_children(pid) else {
-                continue;
-            };
-            for child in children {
-                if child.kind != "folder" {
-                    continue;
-                }
-                let child_rel = rel.join(&child.display_name);
-                let has_grand = store
-                    .list_children(child.id)
-                    .map(|v| !v.is_empty())
-                    .unwrap_or(false);
-                if child.state == NodeState::Placeholder && !has_grand {
-                    out.push(child_rel);
-                } else {
-                    stack.push((child.id, child_rel));
-                }
-            }
-        }
-        out
     }
 
     pub fn enqueue_upload(

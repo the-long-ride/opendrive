@@ -1,8 +1,11 @@
-//! Pure-Rust Control Center application state, actions, custom chrome, Bento Grid, and tray bridge.
+//! Pure-Rust Control Center application state, actions, custom chrome, Bento Grid, Explorer, and tray bridge.
 
+mod actions;
 mod auth_handlers;
 pub mod bento;
 pub mod drawer;
+pub mod explorer;
+mod explorer_actions;
 pub mod ledger;
 pub mod modals;
 pub mod panels;
@@ -11,94 +14,30 @@ pub mod resize;
 mod settings_actions;
 pub mod titlebar;
 
-use crate::design::formatters::{ConnectAuthMode, NewAccountDraft};
-use crate::design::theme::{palette, ThemeMode};
-use crate::desktop::modals::guide::render_cloud_guide_modal;
-use crate::desktop::modals::release::render_release_modal;
-use crate::desktop::modals::settings::render_settings_modal;
-use crate::desktop::panels::{
-    handle_keyboard_zoom, render_notice_toast, render_workspace_panel, tick_notice_timeout,
+pub use self::actions::{NoticeTone, UiAction, UiNotice};
+use self::explorer::jobs::ExplorerJobEvent;
+pub use self::explorer::{
+    AccountExplorerSession, ExplorerClipboard, ExplorerModal, ExplorerSortColumn, ExplorerState,
+    ExplorerViewMode,
 };
-use crate::desktop::resize::handle_frameless_resize;
-use crate::desktop::titlebar::render_custom_titlebar;
+pub use self::modals::open_rules_ui::OpenRuleDraft;
+use self::panels::{
+    handle_keyboard_zoom, render_overlays, render_workspace_panel, tick_notice_timeout,
+};
+use self::resize::handle_frameless_resize;
+use self::titlebar::render_custom_titlebar;
+use crate::design::formatters::NewAccountDraft;
+use crate::design::theme::{palette, ThemeMode};
 use crate::runtime::auth_runner::{AuthEndpoints, AuthSession};
 use crate::runtime::bridge::{AppStateResponse, Bridge};
 use crate::runtime::bridge_types::{AliasEditDraft, VaultBackupDraft};
 use crate::runtime::release_check::{ReleaseCheckHandle, ReleaseInfo};
 use crate::shell::tray::{TrayEventQueue, TraySummaryUpdater};
 use eframe::egui;
-use opendrive_core::DocsMode;
 use std::collections::{HashMap, HashSet};
+use std::sync::mpsc;
 use std::time::Duration;
 use uuid::Uuid;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NoticeTone {
-    Ok,
-    Error,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UiNotice {
-    pub tone: NoticeTone,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UiAction {
-    ToggleDrawer(Option<bool>),
-    ToggleSettings(Option<bool>),
-    ToggleGuide(Option<bool>),
-    OpenCloudConsole,
-    ToggleTheme,
-    SetAuthMode(ConnectAuthMode),
-    ToggleSecretVisibility,
-    StartBrowserOAuth {
-        open_browser: bool,
-        copy_link: bool,
-    },
-    CopyAuthLink,
-    OpenAuthBrowser,
-    StartServiceAccount,
-    ReauthAccount {
-        id: String,
-        open_browser: bool,
-        copy_link: bool,
-    },
-    CancelAuth,
-    AccountAction {
-        action: &'static str,
-        id: Option<String>,
-    },
-    StartEditAlias(String),
-    SaveAlias,
-    CancelAlias,
-    ToggleVaultSecret,
-    ExportVault,
-    ImportVault,
-    OpenVaultBackup,
-    SetBandwidth(Option<u64>),
-    SetCacheMax(u64),
-    SetDocsMode(DocsMode),
-    ToggleAutostart,
-    ToggleVirtualDrive,
-    ToggleCheckUpdates,
-    CheckReleasesNow,
-    OpenReleasePage(String),
-    IgnoreReleaseVersion(String),
-    DismissReleaseDialog,
-    OpenExternalUrl(&'static str),
-    OpenMountRoot,
-    OpenAccountFolder(String),
-    PurgeCache,
-    Refresh,
-    DismissNotice,
-    WindowMinimize,
-    WindowToggleMaximize,
-    WindowRequestClose,
-    WindowShowFromTray,
-    WindowForceQuit,
-}
 
 pub struct ControlCenterApp {
     pub(crate) bridge: Bridge,
@@ -113,6 +52,7 @@ pub struct ControlCenterApp {
     pub draft: NewAccountDraft,
     pub alias_edit: Option<AliasEditDraft>,
     pub vault_draft: VaultBackupDraft,
+    pub open_rule_draft: OpenRuleDraft,
     pub form_error: Option<String>,
     pub notice: Option<UiNotice>,
     pub notice_expires_at: Option<std::time::Instant>,
@@ -131,6 +71,9 @@ pub struct ControlCenterApp {
     pub(crate) release_check: Option<ReleaseCheckHandle>,
     pub release_checking: bool,
     pub(crate) startup_release_checked: bool,
+    pub explorer: ExplorerState,
+    pub(crate) explorer_tx: mpsc::Sender<ExplorerJobEvent>,
+    pub(crate) explorer_rx: mpsc::Receiver<ExplorerJobEvent>,
 }
 
 impl ControlCenterApp {
@@ -144,6 +87,7 @@ impl ControlCenterApp {
             bridge.spawn_mount_sync(None);
         }
         let (client_id, client_secret) = bridge.saved_oauth_credentials();
+        let (explorer_tx, explorer_rx) = mpsc::channel();
         Self {
             bridge,
             state,
@@ -161,6 +105,7 @@ impl ControlCenterApp {
             },
             alias_edit: None,
             vault_draft: VaultBackupDraft::default(),
+            open_rule_draft: OpenRuleDraft::default(),
             form_error: None,
             notice: None,
             notice_expires_at: None,
@@ -179,6 +124,9 @@ impl ControlCenterApp {
             release_check: None,
             release_checking: false,
             startup_release_checked: false,
+            explorer: ExplorerState::default(),
+            explorer_tx,
+            explorer_rx,
         }
     }
 
@@ -234,6 +182,7 @@ impl ControlCenterApp {
             UiAction::ToggleAutostart => self.toggle_autostart(),
             UiAction::ToggleVirtualDrive => self.toggle_virtual_drive(),
             UiAction::ToggleCheckUpdates => self.toggle_check_updates(),
+            UiAction::ToggleExplorerFolderCache => self.toggle_explorer_folder_cache(),
             UiAction::CheckReleasesNow => self.start_release_check(true),
             UiAction::OpenReleasePage(url) => self.open_release_page(&url),
             UiAction::IgnoreReleaseVersion(tag) => self.ignore_release_version(&tag),
@@ -244,6 +193,39 @@ impl ControlCenterApp {
             UiAction::PurgeCache => self.purge_cache(),
             UiAction::Refresh => self.refresh(),
             UiAction::DismissNotice => self.dismiss_notice(),
+            exp @ (UiAction::OpenExplorer(_)
+            | UiAction::CloseExplorer
+            | UiAction::ExplorerSelectAccount(_)
+            | UiAction::ExplorerNavigateNode(_)
+            | UiAction::ExplorerNavigateBreadcrumb(_)
+            | UiAction::ExplorerRefresh
+            | UiAction::ExplorerSelectEntry(_)
+            | UiAction::ExplorerToggleSelect(_)
+            | UiAction::ExplorerSelectRange { .. }
+            | UiAction::ExplorerSelectAll
+            | UiAction::ExplorerSetViewMode(_)
+            | UiAction::ExplorerToggleSort(_)
+            | UiAction::ExplorerSyncDown(_)
+            | UiAction::ExplorerSyncUpItems(_)
+            | UiAction::ExplorerSyncUpFiles
+            | UiAction::ExplorerSyncUpFolder
+            | UiAction::ExplorerSyncUpAndClear(_)
+            | UiAction::ExplorerOpenItem(_)
+            | UiAction::ExplorerCopyStreamUrl(_)
+            | UiAction::ExplorerStartRename(_)
+            | UiAction::ExplorerSaveRename
+            | UiAction::ExplorerRequestDelete(_)
+            | UiAction::ExplorerConfirmDelete
+            | UiAction::ExplorerDismissModal
+            | UiAction::ExplorerSetClipboard { .. }
+            | UiAction::ExplorerClearClipboard
+            | UiAction::ExplorerPasteClipboard(_)) => self.handle_explorer_action(exp),
+            rule @ (UiAction::StartAddOpenWithRule
+            | UiAction::StartEditOpenWithRule(_)
+            | UiAction::SaveOpenWithRule
+            | UiAction::CancelOpenWithRuleEdit
+            | UiAction::RemoveOpenWithRule(_)
+            | UiAction::BrowseOpenWithRuleApp) => self.handle_open_rule_action(rule),
             win @ (UiAction::WindowMinimize
             | UiAction::WindowToggleMaximize
             | UiAction::WindowRequestClose
@@ -258,7 +240,9 @@ impl ControlCenterApp {
         handle_frameless_resize(&ctx);
         handle_keyboard_zoom(&ctx);
         self.handle_dropped_files(&ctx);
+        self.handle_explorer_drop(&ctx);
         self.poll_auth();
+        self.poll_explorer_jobs();
         self.maybe_check_releases_on_startup();
         self.poll_release_check();
         self.poll_bridge_and_avatars(&ctx);
@@ -269,25 +253,12 @@ impl ControlCenterApp {
         tick_notice_timeout(&mut self.notice, &mut self.notice_expires_at, &ctx);
         let pal = palette(self.theme_mode);
         let top_y = render_custom_titlebar(ui, &pal, self.theme_mode, &self.state, &mut actions);
-        render_workspace_panel(ui, &pal, self, &mut actions);
-        if self.settings_open {
-            render_settings_modal(
-                &ctx,
-                &pal,
-                top_y,
-                &self.state,
-                &mut self.vault_draft,
-                self.release_checking,
-                &mut actions,
-            );
+        if self.explorer.open {
+            self::explorer::render_explorer_panel(ui, &pal, self, &mut actions);
+        } else {
+            render_workspace_panel(ui, &pal, self, &mut actions);
         }
-        if self.guide_open {
-            render_cloud_guide_modal(&ctx, &pal, top_y, &mut actions);
-        }
-        if let Some(release) = self.available_release.as_ref() {
-            render_release_modal(&ctx, &pal, top_y, release, &mut actions);
-        }
-        render_notice_toast(&ctx, &pal, self.notice.as_ref(), &mut actions);
+        render_overlays(&ctx, &pal, top_y, self, &mut actions);
         for action in actions {
             self.apply_action(action);
         }
@@ -296,7 +267,10 @@ impl ControlCenterApp {
                 deadline.saturating_duration_since(std::time::Instant::now()),
             );
         }
-        if self.auth_session.is_some() || self.release_checking {
+        if self.auth_session.is_some()
+            || self.release_checking
+            || !self.explorer.busy_accounts.is_empty()
+        {
             ctx.request_repaint_after(Duration::from_millis(100));
         }
     }
@@ -305,5 +279,9 @@ impl ControlCenterApp {
 impl eframe::App for ControlCenterApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.render_root(ui);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.shutdown_session();
     }
 }

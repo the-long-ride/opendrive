@@ -8,9 +8,7 @@ use eframe::egui;
 use opendrive_auth::{
     AuthClient, SecretStore, ServiceAccountKey, AUTH_URL, DEFAULT_TOKEN_URI, TOKEN_URL,
 };
-use opendrive_core::{
-    save_settings, Account, AccountStatus, AppCommand, AppController, CredentialSet, Settings,
-};
+use opendrive_core::{Account, AccountStatus, AppController, CredentialSet};
 use opendrive_drive::DriveClient;
 use opendrive_sync::{SyncEngine, VfsEngine};
 use std::collections::HashMap;
@@ -46,29 +44,31 @@ impl MountManager {
         }
     }
 
-    pub(super) fn sync_virtual_drive(
+    pub(crate) fn refresh_drive_client_for(
         &self,
-        settings: &Settings,
-        root: &Path,
+        account_id: Uuid,
+        ctrl: &Arc<Mutex<AppController>>,
+        engine: &Arc<SyncEngine>,
+        secrets: &Arc<dyn SecretStore>,
+        rt: &tokio::runtime::Handle,
     ) -> Result<(), String> {
-        let desired = (
-            settings.virtual_drive_enabled,
-            settings.virtual_drive_letter.clone(),
-        );
-        let prev = self.last_virtual_drive.lock().expect("vd lock").clone();
-        let was_active = prev.as_ref().is_some_and(|(on, _)| *on);
-        if !desired.0 && !was_active {
-            return Ok(());
-        }
-        if let Some((true, ref old_letter)) = prev {
-            if desired.0 && old_letter != &desired.1 {
-                let _ = self.backend.set_virtual_drive(false, old_letter, root);
-            }
-        }
-        self.backend
-            .set_virtual_drive(desired.0, &desired.1, root)
-            .map_err(|e| format!("Virtual drive {}: {e}", desired.1))?;
-        *self.last_virtual_drive.lock().expect("vd lock") = desired.0.then_some(desired);
+        let (acct, creds) = {
+            let g = ctrl.lock().expect("controller lock");
+            let acct = g
+                .accounts
+                .get_account(account_id)
+                .map_err(|_| "account not found".to_string())?
+                .clone();
+            (acct, g.accounts.list_credentials().to_vec())
+        };
+        let refreshed = rt.block_on(self.refresh_drive_client(&acct, &creds, secrets))?;
+        let drive = refreshed.ok_or_else(|| {
+            format!(
+                "Missing saved credentials for {} — remove and reconnect account",
+                acct.nickname
+            )
+        })?;
+        engine.set_drive_client(account_id, drive);
         Ok(())
     }
 
@@ -259,16 +259,6 @@ impl Bridge {
     }
 
     pub fn update_virtual_drive(&self, enabled: bool) -> Result<AppStateResponse, String> {
-        let next = {
-            let mut g = self.ctrl.lock().expect("controller lock");
-            let mut updated = g.settings.clone();
-            updated.virtual_drive_enabled = enabled;
-            g.handle(AppCommand::UpdateSettings(updated.clone()));
-            updated
-        };
-        if let Some(dir) = &self.config_dir {
-            save_settings(dir, &next).map_err(str_err)?;
-        }
-        Ok(self.state_snapshot())
+        self.modify_settings(|s| s.virtual_drive_enabled = enabled, |_| Ok(()))
     }
 }

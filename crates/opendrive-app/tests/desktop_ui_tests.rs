@@ -130,11 +130,14 @@ fn control_center_actions_theme_toggle_and_errors_work() {
 
     app.apply_action(UiAction::OpenMountRoot);
     assert!(tmp_root.is_dir());
-    assert_eq!(opened_folders.lock().unwrap().len(), 1);
     app.apply_action(UiAction::ToggleVirtualDrive);
     assert!(app.state.settings.virtual_drive_enabled);
     app.apply_action(UiAction::OpenMountRoot);
-    assert_eq!(opened_folders.lock().unwrap().len(), 2);
+    let root_s = tmp_root.display().to_string();
+    assert_eq!(
+        opened_folders.lock().unwrap().as_slice(),
+        [root_s.clone(), root_s]
+    );
     app.apply_action(UiAction::ToggleVirtualDrive);
     assert!(!app.state.settings.virtual_drive_enabled);
 
@@ -157,24 +160,20 @@ fn control_center_actions_theme_toggle_and_errors_work() {
         ..Default::default()
     };
     let mut err_app = ControlCenterApp::with_auth_endpoints(err_bridge, err_endpoints);
-    err_app.apply_action(UiAction::AccountAction {
-        action: "pause_all",
-        id: None,
-    });
-    assert_eq!(
-        err_app.notice.as_ref().map(|n| n.tone),
-        Some(NoticeTone::Error)
-    );
-    err_app.apply_action(UiAction::SetBandwidth(Some(BANDWIDTH_20M)));
-    assert_eq!(
-        err_app.notice.as_ref().map(|n| n.tone),
-        Some(NoticeTone::Error)
-    );
-    err_app.apply_action(UiAction::OpenMountRoot);
-    assert_eq!(
-        err_app.notice.as_ref().map(|n| n.tone),
-        Some(NoticeTone::Error)
-    );
+    for act in [
+        UiAction::AccountAction {
+            action: "pause_all",
+            id: None,
+        },
+        UiAction::SetBandwidth(Some(BANDWIDTH_20M)),
+        UiAction::OpenMountRoot,
+    ] {
+        err_app.apply_action(act);
+        assert_eq!(
+            err_app.notice.as_ref().map(|n| n.tone),
+            Some(NoticeTone::Error)
+        );
+    }
 
     bridge
         .controller_handle()

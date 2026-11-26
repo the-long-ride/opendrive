@@ -1,6 +1,6 @@
 //! Content cache index helpers.
 
-use crate::types::{now_ms, Result};
+use crate::types::{now_ms, NodeState, Result};
 use crate::Store;
 use rusqlite::{params, OptionalExtension};
 
@@ -72,5 +72,49 @@ impl Store {
             params![now_ms(), node_id],
         )?;
         Ok(())
+    }
+
+    pub fn clear_node_cache_state(&self, node_id: i64) -> Result<()> {
+        self.remove_cache_entry(node_id)?;
+        self.conn.execute(
+            "UPDATE nodes SET state=?1, pinned=0 WHERE id=?2",
+            params![NodeState::Placeholder.as_str(), node_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn trash_node_and_clear(&self, node_id: i64) -> Result<()> {
+        self.remove_cache_entry(node_id)?;
+        self.conn.execute(
+            "UPDATE nodes SET trashed=1, pinned=0 WHERE id=?1",
+            params![node_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn relocate_cache_prefix(&self, old_path: &str, new_path: &str) -> Result<usize> {
+        let old_p = std::path::Path::new(old_path);
+        let new_p = std::path::Path::new(new_path);
+        let mut stmt = self.conn.prepare("SELECT node_id, path FROM cache_files")?;
+        let rows: Vec<(i64, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<std::result::Result<_, _>>()?;
+        drop(stmt);
+        let mut moved = 0usize;
+        for (nid, p) in rows {
+            if let Ok(rel) = std::path::Path::new(&p).strip_prefix(old_p) {
+                let updated = if rel.as_os_str().is_empty() {
+                    new_p.to_path_buf()
+                } else {
+                    new_p.join(rel)
+                };
+                self.conn.execute(
+                    "UPDATE cache_files SET path=?1 WHERE node_id=?2",
+                    params![updated.to_string_lossy().as_ref(), nid],
+                )?;
+                moved += 1;
+            }
+        }
+        Ok(moved)
     }
 }

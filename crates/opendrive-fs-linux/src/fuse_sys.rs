@@ -1,6 +1,6 @@
 //! Linux `fuser::Filesystem` implementation backed by `InodeTable`.
 
-use crate::fuse_helpers::{attr_from, create_dir_entry, root_attr, TTL};
+use crate::fuse_helpers::{attr_from, create_inode_attr, root_attr, TTL};
 use crate::inode_table::InodeTable;
 use fuser::{
     FileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
@@ -176,24 +176,16 @@ impl Filesystem for FuseFs {
         _flags: i32,
         reply: ReplyCreate,
     ) {
-        let Some(parent_node) = self.inodes.node_of(parent) else {
-            reply.error(libc::ENOENT);
-            return;
-        };
-        let eng = self.engine.clone();
-        let name = name.to_os_string();
-        match self
-            .rt
-            .block_on(async move { eng.create(parent_node, &name, Kind::File).await })
-        {
-            Ok(attr) => {
-                let ino = self.inodes.alloc_ino(attr.id);
-                reply.created(&TTL, &attr_from(&attr, ino), 0, 0, 0);
-            }
-            Err(e) => {
-                error!(?e, "create");
-                reply.error(libc::EIO);
-            }
+        match create_inode_attr(
+            &self.engine,
+            &self.inodes,
+            &self.rt,
+            parent,
+            name,
+            Kind::File,
+        ) {
+            Ok((_ino, attr)) => reply.created(&TTL, &attr, 0, 0, 0),
+            Err(code) => reply.error(code),
         }
     }
 
@@ -206,15 +198,17 @@ impl Filesystem for FuseFs {
         _umask: u32,
         reply: ReplyEntry,
     ) {
-        create_dir_entry(
+        match create_inode_attr(
             &self.engine,
             &self.inodes,
             &self.rt,
             parent,
             name,
             Kind::Folder,
-            reply,
-        );
+        ) {
+            Ok((_ino, attr)) => reply.entry(&TTL, &attr, 0),
+            Err(code) => reply.error(code),
+        }
     }
 
     fn unlink(&mut self, _req: &Request<'_>, parent: u64, name: &OsStr, reply: ReplyEmpty) {

@@ -3,7 +3,7 @@
 use crate::engine::SyncEngine;
 use crate::{Result, SyncError};
 use opendrive_drive::{DriveClient, DriveFile};
-use opendrive_store::{NodeState, UploadRow};
+use opendrive_store::{now_ms, NodeState, UploadRow};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,7 +20,11 @@ impl SyncEngine {
         let Some(row) = row else {
             return Ok(false);
         };
+        self.process_upload_row(row).await?;
+        Ok(true)
+    }
 
+    pub(crate) async fn process_upload_row(&self, row: UploadRow) -> Result<()> {
         {
             let store = self.store.lock();
             let _ = store.update_upload(
@@ -114,7 +118,7 @@ impl SyncEngine {
                     let _ = store.upsert_node(&n);
                 }
                 info!(op_id = row.op_id, op = %row.op, "queue op done");
-                Ok(true)
+                Ok(())
             }
             Err(e) => {
                 self.errors.fetch_add(1, Ordering::Relaxed);
@@ -206,12 +210,5 @@ struct UploadTarget<'a> {
     drive_id: &'a str,
     name: &'a str,
     parent_drive: &'a str,
-    total: u64,
-}
-
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    pub(crate) total: u64,
 }

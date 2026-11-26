@@ -211,6 +211,18 @@ async fn provider_bridge_propagates_engine_errors_and_none_lookup() {
         .await
         .unwrap_err()
         .contains("pin boom"));
+    let fe = FailingEngine;
+    let _rx = fe.subscribe();
+    fe.add_account(Uuid::nil()).await.unwrap();
+    fe.remove_account(Uuid::nil()).await.unwrap();
+    assert_eq!(fe.stats().await.transfers, 0);
+    assert!(fe.stat(1).await.is_err());
+    assert!(fe.read(1, 0, 1).await.is_err());
+    assert_eq!(fe.open_write(2).await.unwrap().node, 2);
+    assert!(fe.write(1, 0, b"a").await.is_err());
+    assert!(fe.lookup(0, OsStr::new("x")).await.is_err());
+    assert!(fe.rename(1, 0, OsStr::new("x")).await.is_err());
+    assert!(fe.remove(1).await.is_err());
 }
 
 #[test]

@@ -3,6 +3,8 @@ name = "opendrive-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
 
 [lib]
 path = "src/lib.rs"
@@ -14,19 +16,18 @@ path = "src/main.rs"
 [features]
 default = []
 # System tray: cargo run -p opendrive-app --features tray -- tray
-tray = ["dep:tray-icon", "dep:winit"]
+tray = ["dep:tray-icon"]
 
 [dependencies]
-opendrive-core = { path = "../opendrive-core", version = "0.1.0" }
-opendrive-sync = { path = "../opendrive-sync", version = "0.1.0" }
-opendrive-store = { path = "../opendrive-store", version = "0.1.0" }
-opendrive-auth = { path = "../opendrive-auth", version = "0.1.0" }
-opendrive-drive = { path = "../opendrive-drive", version = "0.1.0" }
-opendrive-platform = { path = "../opendrive-platform", version = "0.1.0" }
+opendrive-core = { path = "../opendrive-core", version = "0.2.0" }
+opendrive-sync = { path = "../opendrive-sync", version = "0.2.0" }
+opendrive-store = { path = "../opendrive-store", version = "0.2.0" }
+opendrive-auth = { path = "../opendrive-auth", version = "0.2.0" }
+opendrive-drive = { path = "../opendrive-drive", version = "0.2.0" }
+opendrive-platform = { path = "../opendrive-platform", version = "0.2.0" }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = "0.3"
 anyhow = { workspace = true }
@@ -35,19 +36,22 @@ eframe = { version = "0.37", default-features = false, features = ["glow", "defa
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 tray-icon = { version = "0.26.1", default-features = false, features = ["ksni"], optional = true }
-winit = { version = "0.30", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-opendrive-fs-linux = { path = "../opendrive-fs-linux", version = "0.1.0" }
+opendrive-fs-linux = { path = "../opendrive-fs-linux", version = "0.2.0" }
 
 [target.'cfg(windows)'.dependencies]
-opendrive-fs-windows = { path = "../opendrive-fs-windows", version = "0.1.0" }
+opendrive-fs-windows = { path = "../opendrive-fs-windows", version = "0.2.0" }
 tray-icon = { version = "0.26.1", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-opendrive-fs-macos = { path = "../opendrive-fs-macos", version = "0.1.0" }
+opendrive-fs-macos = { path = "../opendrive-fs-macos", version = "0.2.0" }
 tray-icon = { version = "0.26.1", default-features = false }
 
 [dev-dependencies]
-opendrive-fake-drive = { path = "../opendrive-fake-drive", version = "0.1.0" }
+opendrive-fake-drive = { path = "../opendrive-fake-drive", version = "0.2.0" }
+serde_json = { workspace = true }
 url = { workspace = true }
+
+[lints]
+workspace = true

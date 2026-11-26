@@ -6,14 +6,14 @@ kind: "architecture"
 status: "verified"
 summary: "Cross-platform virtual filesystem adapters bridging Linux FUSE3, macOS localhost NFSv3, and Windows Cloud Files API to VfsEngine."
 tags: ["vfs", "fuse3", "nfs3", "cfapi", "linux", "macos", "windows"]
-source_paths: ["crates/opendrive-fs-linux/src/fuse_helpers.rs", "crates/opendrive-fs-linux/src/fuse_sys.rs", "crates/opendrive-fs-linux/src/inode_table.rs", "crates/opendrive-fs-linux/src/lib.rs", "crates/opendrive-fs-macos/src/lib.rs", "crates/opendrive-fs-macos/src/nfs_backend.rs", "crates/opendrive-fs-macos/src/nfs_vfs.rs", "crates/opendrive-fs-macos/tests/nfs_vfs_tests.rs", "crates/opendrive-fs-windows/src/cfapi_sys.rs", "crates/opendrive-fs-windows/src/lib.rs", "crates/opendrive-fs-windows/src/provider.rs", "crates/opendrive-fs-windows/tests/windows_vfs_tests.rs"]
+source_paths: ["crates/opendrive-fs-linux/src/fuse_helpers.rs", "crates/opendrive-fs-linux/src/fuse_sys.rs", "crates/opendrive-fs-linux/src/inode_table.rs", "crates/opendrive-fs-linux/src/lib.rs", "crates/opendrive-fs-macos/src/lib.rs", "crates/opendrive-fs-macos/src/nfs_backend.rs", "crates/opendrive-fs-macos/src/nfs_vfs.rs", "crates/opendrive-fs-macos/tests/macos_coverage_tests.rs", "crates/opendrive-fs-macos/tests/nfs_vfs_tests.rs", "crates/opendrive-fs-windows/src/cfapi_sys.rs", "crates/opendrive-fs-windows/src/lib.rs", "crates/opendrive-fs-windows/src/provider.rs", "crates/opendrive-fs-windows/tests/windows_coverage_tests.rs", "crates/opendrive-fs-windows/tests/windows_vfs_tests.rs"]
 related_specs: ["architecture.workspace-overview", "workflow.sync-hydration-conflicts", "interface.cli-http-bridge"]
-last_doc_update_at: "2026-11-18T10:43:00Z"
-last_verified_at: "2026-11-18T10:43:00Z"
-last_verified_code_commit: "018d1c9aa32bb78dfe351da53e12305b69e679c8"
-last_source_change_commit: "018d1c9aa32bb78dfe351da53e12305b69e679c8"
-last_source_change_at: "2026-11-18T10:43:00Z"
-source_fingerprint: "sha256:e7f6439278c7087d2676c23c96bf69d8ad07dd224d3ebc05f82e498bd204d6ab"
+last_doc_update_at: "2026-11-26T09:04:59Z"
+last_verified_at: "2026-11-26T09:04:59Z"
+last_verified_code_commit: "2e0bf0d6bdb4339a18b9db5cf3ebc0f6c20820b7"
+last_source_change_commit: "600d2df0ad0c4d97420d87fa94048e4eac1b8129"
+last_source_change_at: "2026-11-26T14:29:37+07:00"
+source_fingerprint: "sha256:c7efe4cd0c3228e557345cb0d968b016abdfb796a90c329e1a83d3138687a83a"
 ---
 
 # OS Filesystem Adapters (Linux FUSE3, macOS NFSv3, Windows CFAPI)
@@ -39,27 +39,24 @@ Translates OS-native virtual filesystem callbacks on Linux (`opendrive-fs-linux`
 ### Windows Cloud Files API (`opendrive-fs-windows`)
 - `CloudFilesFrontend` resolves `%USERPROFILE%\OpenDrive` (fallback `HOME`, then `.`) via `parent_folder()` and sibling account roots via `account_root(folder)`. `register_sync_root` delegates to `register_sync_root_at(path, account_name, 0)`, creating the directory and tracking `(SyncRootIdentity, Arc<ProviderBridge>)` bound to a specific VFS `root_node: NodeId` without requiring shell registration. `connect_live` delegates to `connect_live_at(path, account_name, 0, rt)`, which registers the per-account root at `root_node` and invokes `cfapi_sys::connect_sync_root` for multi-account CFAPI root isolation.
 - `ProviderBridge` (`ProviderBridge::new` defaults `root_node = 0`; `ProviderBridge::with_root(engine, root_node)` and `root_node()`) caches `PathBuf` -> `NodeId` mappings and wraps `VfsEngine` operations (`fetch_placeholders`, `fetch_data`, `lookup_child`, `create_entry`, `write_data`, `rename_entry`, `delete_entry`, `set_pinned`) returning `String` errors.
-- Under `#[cfg(windows)]`, `CfSyncFilter` implements `cloud_filter::filter::SyncFilter`, resolving `NodeId` from 8-byte little-endian `request.file_blob()` or walking relative path components starting from `self.bridge.root_node()` (so empty relative path resolves to `root_node()` rather than `0`). `fetch_data` aligns reads to `CF_BLOCK_ALIGN` (4096 bytes) clamped to `file_size`, streams in `CF_CHUNK_SIZE` (1 MiB) chunks via `ticket.write_at`, and fails tickets with `MetadataCorrupt`, `NetworkUnavailable`, or `Unsuccessful`. `fetch_placeholders` returns `Err(CloudErrorKind::NetworkUnavailable)` when `ProviderBridge::fetch_placeholders` fails (never passing an empty list that would permanently mark unhydrated directories populated-empty), and otherwise passes batches of `PLACEHOLDER_BATCH_SIZE` (64) `PlaceholderCreateInfo` entries marked in-sync (`&mut []` when empty). `reconcile_placeholder_dirs` opens pre-existing NTFS `Placeholder` directories via `Placeholder::options().open(&dir)` and applies `UpdateOptions::default().has_children().mark_in_sync()` (`CF_UPDATE_FLAG_ENABLE_ON_DEMAND_POPULATION`) so previously sealed folders request fresh placeholder hydration. `connect_sync_root` registers `SyncRootIdBuilder` (`HydrationType::Full`, `PopulationType::Full`, `ProtectionMode::Personal`, `allow_pinning(true)`, `show_siblings_as_group(true)`) and connects `Session::new().block_implicit_hydration()`.
+- Under `#[cfg(windows)]`, `CfSyncFilter` implements `cloud_filter::filter::SyncFilter`, resolving `NodeId` from 8-byte little-endian `request.file_blob()` or walking relative path components starting from `self.bridge.root_node()` (so empty relative path resolves to `root_node()` rather than `0`). `fetch_data` aligns reads to `CF_BLOCK_ALIGN` (4096 bytes) clamped to `file_size`, streams in `CF_CHUNK_SIZE` (1 MiB) chunks via `ticket.write_at`, and fails tickets with `MetadataCorrupt`, `NetworkUnavailable`, or `Unsuccessful`. `fetch_placeholders` returns `Err(CloudErrorKind::NetworkUnavailable)` when `ProviderBridge::fetch_placeholders` fails, and otherwise passes batches of `PLACEHOLDER_BATCH_SIZE` (64) `PlaceholderCreateInfo` entries marked in-sync. `CfSyncFilter` also implements `dehydrate` (passes ticket), `delete` (calling `bridge.delete_entry` + `remove_path` when `!info.is_undelete()`), and `rename` (`handle_in_scope_rename` when `source_in_scope()` and `target_in_scope()`, otherwise deleting via `bridge.delete_entry` + `remove_path`). `cfapi_sys.rs` hosts `connect_sync_root` (sanitizing `'!'` via `sanitize_sync_root_account` before `SyncRootIdBuilder`, registering/updating `SyncRootInfo` when unregistered or `icon_resource` changed, and starting `Session::new().block_implicit_hydration()`), `reconcile_placeholder_dirs`, and `dehydrate_placeholder`; `lib.rs` exposes `SYNC_ROOT_PROVIDER`, `try_dehydrate_placeholder`, `unregister_os_sync_root`, and `unregister_all_opendrive_roots` (WinRT `SyncRootId::unregister()` cleanup across active `OpenDrive!` registrations matched via `is_opendrive_sync_root_id`).
 
 ## Code map
 - `crates/opendrive-fs-linux/src/lib.rs` — `FuseFrontend`, cross-platform `mount` stub, and non-Linux unit tests.
 - `crates/opendrive-fs-linux/src/inode_table.rs` — `InodeTable` (`1 -> NodeId(0)` mapping, permissions, 512-byte block calculation) and unit tests.
-- `crates/opendrive-fs-linux/src/fuse_helpers.rs` — Linux `root_attr`, `attr_from`, `create_dir_entry`, `resolve_node`, and `fuser::mount2` entry point.
-- `crates/opendrive-fs-linux/src/fuse_sys.rs` — Linux `FuseFs` implementing `fuser::Filesystem`.
+- `crates/opendrive-fs-linux/src/fuse_helpers.rs` — Linux `root_attr`, `attr_from`, `create_inode_attr`, `mount` entry point, and unit tests.
+- `crates/opendrive-fs-linux/src/fuse_sys.rs` — Linux `FuseFs` implementing `fuser::Filesystem` (`lookup`, `getattr`, `readdir`, `read`, `write`, `create`, `mkdir`, `unlink`, `rmdir`, `rename`).
 - `crates/opendrive-fs-macos/src/lib.rs` — `NfsFrontend` lifecycle (`serve_loopback`, `serve_and_mount`, `mount_command_hint`, `unmount`) and unit tests.
 - `crates/opendrive-fs-macos/src/nfs_backend.rs` — `NfsBackend` handle table, AppleDouble/DS_Store filtering, async CRUD wrappers, and unit test.
 - `crates/opendrive-fs-macos/src/nfs_vfs.rs` — `NFSFileSystem` trait implementation for `NfsBackend` and `bind_loopback_nfs` TCP listener spawner.
-- `crates/opendrive-fs-macos/tests/nfs_vfs_tests.rs` — Integration tests for `NfsFrontend`, pagination, EOF, and `NFS3ERR_*` error propagation.
-- `crates/opendrive-fs-windows/src/lib.rs` — `SyncRootIdentity`, `CloudFilesFrontend` (`register_sync_root_at`, `connect_live_at`, multi-root tracking), and 3 unit tests (including `provider_bridge_with_root_and_register_at`).
+- `crates/opendrive-fs-macos/tests/{macos_coverage_tests,nfs_vfs_tests}.rs` — Integration tests for `NfsFrontend`, pagination, EOF, AppleDouble/`lookup` edge paths, and `NFS3ERR_*` error propagation.
+- `crates/opendrive-fs-windows/src/lib.rs` — `SYNC_ROOT_PROVIDER`, `SyncRootIdentity`, `CloudFilesFrontend` (`with_icon_resource`, `register_sync_root_at`, `reconcile_placeholders`, `connect_live_at`, `try_dehydrate_placeholder`, `unregister_sync_root`, `unregister_os_sync_root`, `unregister_all_opendrive_roots`, `roots`, `sanitize_sync_root_account`, `is_opendrive_sync_root_id`), and 5 unit tests.
 - `crates/opendrive-fs-windows/src/provider.rs` — `ProviderBridge` (`with_root`, `root_node`, relative-path index, `VfsEngine` wrappers) and unit tests.
-- `crates/opendrive-fs-windows/src/cfapi_sys.rs` — Windows `CfSyncFilter` (`SyncFilter` impl using `bridge.root_node()`) and `connect_sync_root` CFAPI session setup.
-- `crates/opendrive-fs-windows/tests/windows_vfs_tests.rs` — Integration tests for `ProviderBridge` error propagation, multi-root registration, and Windows `connect_live` error path.
+- `crates/opendrive-fs-windows/src/cfapi_sys.rs` — Windows `CfSyncFilter` (`SyncFilter` impl using `bridge.root_node()`), `connect_sync_root`, `reconcile_placeholder_dirs`, and `dehydrate_placeholder`.
+- `crates/opendrive-fs-windows/tests/{windows_coverage_tests,windows_vfs_tests}.rs` — Integration tests for `ProviderBridge` error propagation, multi-root registration, placeholder cleanup, non-Windows `unregister_all_opendrive_roots()` coverage, and Windows `connect_live` error path.
 
 ## Verification
-Tests defined in the inspected source files (not executed in this doc-sync pass):
-- `opendrive-fs-linux`: 5 unit tests in `inode_table.rs`; 2 tests in `lib.rs` (1 gated `#[cfg(not(target_os = "linux"))]`). Linux `fuse_helpers.rs` and `fuse_sys.rs` compile only on `target_os = "linux"` and are excluded from `llvm-cov` (`fuse_sys.rs`).
-- `opendrive-fs-macos`: 3 unit tests (`lib.rs`, `nfs_backend.rs`) + 4 integration tests (`tests/nfs_vfs_tests.rs`).
-- `opendrive-fs-windows`: 5 unit tests (`lib.rs` 3 tests, `provider.rs` 2 tests) + 3 integration tests (`tests/windows_vfs_tests.rs`, 1 gated `#[cfg(windows)]`); `cfapi_sys.rs` is excluded from `llvm-cov` in `scripts/test-coverage-rust.mjs`.
+- `opendrive-fs-linux`, `opendrive-fs-macos`, and `opendrive-fs-windows`: all unit and integration suites (`cargo test --workspace --locked`) pass; `fuse_sys.rs` and `cfapi_sys.rs` are excluded from `llvm-cov` in `scripts/test-coverage-rust.mjs`.
 
 ## Related documentation
 - [Workspace overview](../architecture/workspace-overview.md)

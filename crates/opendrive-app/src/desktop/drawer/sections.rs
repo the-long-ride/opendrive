@@ -1,7 +1,7 @@
 use super::{drawer_field, render_form_error, render_optional_fields};
 use crate::design::formatters::{ConnectAuthMode, NewAccountDraft};
 use crate::design::theme::ThemePalette;
-use crate::design::widgets::{pill_button, ButtonVariant, IconKind};
+use crate::design::widgets::{pill_button, singleline_input, ButtonVariant, IconKind};
 use crate::desktop::UiAction;
 use crate::runtime::auth_runner::AuthSession;
 use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke, TextEdit};
@@ -111,9 +111,7 @@ pub(super) fn render_browser_oauth_body(
         let field_w = (ui.available_width() - 78.0).max(100.0);
         ui.add_sized(
             [field_w, 32.0],
-            TextEdit::singleline(&mut draft.client_secret)
-                .password(!draft.show_secret)
-                .hint_text("GOCSPX-..."),
+            singleline_input(&mut draft.client_secret, "GOCSPX-...").password(!draft.show_secret),
         );
         let toggle_lbl = if draft.show_secret { "Hide" } else { "Show" };
         if pill_button(

@@ -62,7 +62,7 @@ fn render_storage_tile(
     let drive_chip = if state.settings.virtual_drive_enabled
         && opendrive_platform::is_virtual_drive_supported()
     {
-        format!("{}:\\ Active", state.settings.virtual_drive_letter)
+        "This PC Active".to_string()
     } else {
         format_platform_label(&state.platform).to_string()
     };
@@ -80,13 +80,15 @@ fn render_storage_tile(
                     .strong()
                     .color(pal.text_primary),
             );
-            ui.add_space(6.0);
-            quota_progress_bar(
-                ui,
-                pal,
-                total.ratio,
-                crate::design::widgets::usage_bar_color(pal, total.ratio),
-            );
+            if total.has_exact_total {
+                ui.add_space(6.0);
+                quota_progress_bar(
+                    ui,
+                    pal,
+                    total.ratio,
+                    crate::design::widgets::usage_bar_color(pal, total.ratio),
+                );
+            }
             ui.add_space(10.0);
             ui.horizontal_wrapped(|ui| {
                 if pill_button(
@@ -110,6 +112,17 @@ fn render_storage_tile(
                     true,
                 ) {
                     actions.push(UiAction::ToggleSettings(Some(true)));
+                }
+                if pill_button(
+                    ui,
+                    pal,
+                    Some(IconKind::Explore),
+                    "Explore",
+                    ButtonVariant::Primary,
+                    true,
+                    true,
+                ) {
+                    actions.push(UiAction::OpenExplorer(String::new()));
                 }
             });
         },

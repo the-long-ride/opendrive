@@ -193,6 +193,19 @@ fn virtual_drive_persistence_error_notices_and_live_backend_surface() {
 
     sync_bridge(&bridge);
     assert!(mounts.is_virtual_drive_active());
+    assert!(backend
+        .this_pc_namespaces
+        .lock()
+        .unwrap()
+        .contains(&(true, mount_root.clone(), None)));
+    mounts.shutdown_all();
+    assert!(!mounts.is_virtual_drive_active());
+    assert!(load_settings(&cfg).unwrap().virtual_drive_enabled);
+    assert_eq!(
+        backend.this_pc_namespaces.lock().unwrap().last(),
+        Some(&(false, mount_root.clone(), None))
+    );
+    sync_bridge(&bridge);
 
     bridge
         .controller_handle()
@@ -201,17 +214,20 @@ fn virtual_drive_persistence_error_notices_and_live_backend_surface() {
         .settings
         .virtual_drive_letter = "P".into();
     sync_bridge(&bridge);
-    assert!(backend
-        .virtual_drives
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|(on, letter, _)| !*on && letter == "O"));
+    let vds = backend.virtual_drives.lock().unwrap().clone();
+    assert!(!vds.iter().any(|(on, _, _)| *on));
+    assert!(vds.iter().any(|(on, letter, _)| !*on && letter == "O"));
+    assert!(vds.iter().any(|(on, letter, _)| !*on && letter == "P"));
 
     let state = bridge.update_virtual_drive(false).unwrap();
     assert!(!state.settings.virtual_drive_enabled);
     sync_bridge(&bridge);
     assert!(!mounts.is_virtual_drive_active());
+    assert!(backend.this_pc_namespaces.lock().unwrap().contains(&(
+        false,
+        mount_root.clone(),
+        None
+    )));
 
     bridge
         .controller_handle()
@@ -247,12 +263,19 @@ fn virtual_drive_persistence_error_notices_and_live_backend_surface() {
     let live_dir = std::env::temp_dir().join(format!("od-live-dir-{}", Uuid::new_v4()));
     live.prepare_root(&live_dir).unwrap();
     assert!(live_dir.is_dir());
+    std::fs::write(live_dir.join("f.bin"), b"x").unwrap();
+    live.dehydrate_path(&live_dir);
     live.unregister_account(&live_dir);
     assert!(live.set_virtual_drive(true, "C", &live_dir).is_err());
+    assert!(live.cleanup_legacy_subst("C", &live_dir).is_err());
     let _ = live.set_virtual_drive(false, "C", &live_dir);
+    let _ = live.cleanup_legacy_subst("O", &live_dir);
 
     let blocker = std::env::temp_dir().join(format!("od-live-blk-{}", Uuid::new_v4()));
     std::fs::write(&blocker, b"x").unwrap();
+    assert!(live
+        .sync_this_pc_namespace(true, &blocker.join("child"), None)
+        .is_err());
     let rt = tokio::runtime::Runtime::new().unwrap();
     let acct = make_account(Uuid::new_v4(), Uuid::nil(), "Blk", AccountStatus::Connected);
     let vfs: Arc<dyn VfsEngine> = Arc::new(SyncEngine::new(Store::open_in_memory().unwrap()));

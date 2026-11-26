@@ -40,6 +40,10 @@ pub struct FileJson {
     pub modified_time: Option<String>,
     pub parents: Option<Vec<String>>,
     pub trashed: Option<bool>,
+    #[serde(rename = "ownedByMe")]
+    pub owned_by_me: Option<bool>,
+    #[serde(rename = "sharedWithMeTime")]
+    pub shared_with_me_time: Option<String>,
     #[serde(rename = "headRevisionId")]
     pub head_revision_id: Option<String>,
     #[serde(rename = "shortcutDetails")]
@@ -61,6 +65,12 @@ impl From<FileJson> for DriveFile {
             modified_time: f.modified_time,
             parents: f.parents.unwrap_or_default(),
             trashed: f.trashed.unwrap_or(false),
+            owned_by_me: f.owned_by_me,
+            shared_with_me: Some(
+                f.shared_with_me_time
+                    .as_deref()
+                    .is_some_and(|s| !s.is_empty()),
+            ),
             head_revision_id: f.head_revision_id,
             shortcut_target_id,
             shortcut_target_mime,
@@ -93,6 +103,8 @@ pub struct DriveFile {
     pub modified_time: Option<String>,
     pub parents: Vec<String>,
     pub trashed: bool,
+    pub owned_by_me: Option<bool>,
+    pub shared_with_me: Option<bool>,
     pub head_revision_id: Option<String>,
     pub shortcut_target_id: Option<String>,
     pub shortcut_target_mime: Option<String>,

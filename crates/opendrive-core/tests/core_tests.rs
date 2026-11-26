@@ -74,6 +74,8 @@ fn account_manager_and_io_roundtrip() {
         virtual_drive_enabled: true,
         virtual_drive_letter: "Z".into(),
         ignored_release_version: Some("v0.2.0".into()),
+        open_with_rules: Vec::new(),
+        explorer_folder_cache: true,
     };
     save_settings(&dir, &settings).unwrap();
     assert!(settings_path(&dir).exists());

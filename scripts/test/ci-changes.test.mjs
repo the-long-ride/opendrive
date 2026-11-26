@@ -84,6 +84,17 @@ test('getPrChangedFiles and CLI entrypoint classify PR and non-PR events', () =>
     });
     assert.equal(pushRun.status, 0, pushRun.stderr);
     assert.deepEqual(JSON.parse(pushRun.stdout), { node: true, rust: true });
+
+    const bareEnv = { ...process.env };
+    delete bareEnv.GITHUB_EVENT_NAME;
+    delete bareEnv.BASE_SHA;
+    const bareRun = spawnSync(process.execPath, [scriptPath], {
+      cwd,
+      encoding: 'utf8',
+      env: bareEnv,
+    });
+    assert.equal(bareRun.status, 0, bareRun.stderr);
+    assert.deepEqual(JSON.parse(bareRun.stdout), { node: true, rust: true });
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

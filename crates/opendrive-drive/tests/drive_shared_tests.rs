@@ -67,6 +67,36 @@ async fn shared_with_me_shortcuts_and_avatar_photo_fetch() {
         Some("application/vnd.google-apps.folder")
     );
 
+    drive.set_root_real_id("0AF-drive-root-1");
+    drive.add_file(FakeFile {
+        id: "loose-owned".into(),
+        name: "Loose.zip".into(),
+        mime_type: "application/zip".into(),
+        size: 12,
+        parents: vec![],
+        head_revision_id: Some("r1".into()),
+        ..Default::default()
+    });
+    drive.add_file(FakeFile {
+        id: "anyone-link".into(),
+        name: "SharedLink.zip".into(),
+        mime_type: "application/zip".into(),
+        size: 20,
+        parents: vec![],
+        head_revision_id: Some("r1".into()),
+        ..Default::default()
+    });
+    drive.mark_unowned("anyone-link");
+
+    assert_eq!(client.root_folder_id().await.unwrap(), "0AF-drive-root-1");
+    let unparented = client.list_top_unparented_files().await.unwrap();
+    let loose = unparented.iter().find(|f| f.id == "loose-owned").unwrap();
+    assert_eq!(loose.owned_by_me, Some(true));
+    assert_eq!(loose.shared_with_me, Some(false));
+    let link = unparented.iter().find(|f| f.id == "anyone-link").unwrap();
+    assert_eq!(link.owned_by_me, Some(false));
+    assert_eq!(link.shared_with_me, Some(false));
+
     let shared = client.list_shared_with_me(None).await.unwrap();
     assert_eq!(shared.files.len(), 1);
     assert_eq!(shared.files[0].id, "shared-item");

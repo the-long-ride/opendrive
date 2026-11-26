@@ -77,17 +77,32 @@ use std::collections::{HashMap, HashSet};
 pub struct FakeExtras {
     pub photo_url: Option<String>,
     pub shared_with_me: HashSet<String>,
+    pub unowned: HashSet<String>,
+    pub root_real_id: Option<String>,
     pub shortcuts: HashMap<String, (String, String)>,
     pub assets: HashMap<String, Vec<u8>>,
 }
 
 pub fn file_to_json(f: &FakeFile, extras: &FakeExtras) -> Value {
     let mut obj = f.to_json();
-    if let (Some(map), Some((tid, tmime))) = (obj.as_object_mut(), extras.shortcuts.get(&f.id)) {
+    let is_swm = extras.shared_with_me.contains(&f.id);
+    if let Some(map) = obj.as_object_mut() {
+        if is_swm {
+            map.insert(
+                "sharedWithMeTime".into(),
+                Value::String("2026-01-01T00:00:00.000Z".into()),
+            );
+        }
         map.insert(
-            "shortcutDetails".into(),
-            json!({ "targetId": tid, "targetMimeType": tmime }),
+            "ownedByMe".into(),
+            Value::Bool(!is_swm && !extras.unowned.contains(&f.id)),
         );
+        if let Some((tid, tmime)) = extras.shortcuts.get(&f.id) {
+            map.insert(
+                "shortcutDetails".into(),
+                json!({ "targetId": tid, "targetMimeType": tmime }),
+            );
+        }
     }
     obj
 }

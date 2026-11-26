@@ -2,6 +2,30 @@
 
 All notable changes to OpenDrive are documented in this file.
 
+## [v0.2.0] - 2026-11-26
+
+### Added
+
+- **Built-in Full-Viewport Drive Explorer (`desktop/explorer/*`, `desktop/explorer_actions.rs`)**: Full-viewport Bento split Cloud Explorer with per-account session persistence (breadcrumbs, search filter, sort column/direction, selection, visited-folder path cache controlled by `Settings::explorer_folder_cache`), List/Grid view toggle, multi-selection (`Ctrl/Cmd+Click`, `Shift+Click`, `Ctrl/Cmd+A`, checkboxes, click-outside clear), double-click and `Enter` to open folders/files, colored `MediaKind` vector icons (`icons_media.rs`), `Sync State` badges (`Local`/`Dirty`/`Conflict`/`Syncing`/`Cloud`), UTC timestamps, drag-and-drop uploads, and right-click context menus.
+- **Lockstep Cloud + Local File Operations & Batch Actions (`opendrive-sync/src/{file_ops,file_copy}.rs`, `runtime/{explorer_file_ops,explorer_batch}.rs`, `explorer/{file_ops_ui,file_ops_modal}.rs`)**: Rename, Copy, Move, and Delete (Drive Trash + local cleanup) synchronized across Google Drive, SQLite/disk cache, and mounted placeholders, plus multi-item batch execution (`BatchOutcome`) and an internal Explorer Copy/Move clipboard (`Paste`/`Clear`).
+- **Explicit Sync Down, Sync Up & Verified Clear Local (`opendrive-sync/src/replica_*.rs`, `runtime/explorer_ops.rs`)**: `sync_down_node` (atomic download + cache pinning + Windows CFAPI placeholder reconciliation), recursive `sync_up_local_path`, in-place `sync_up_node`, and two-phase Safety Invariant #3 `sync_up_and_clear_local` (verifies remote `drive_id` before removing local replicas or dehydrating CFAPI placeholders).
+- **Localhost HTTP/1.1 `206` Video Streaming (`runtime/media_server.rs`, `opendrive-sync/src/{stream_cache,stream_store}.rs`)**: Token-gated `127.0.0.1` `GET`/`HEAD` `206 Partial Content` streaming server backed by a `2 MiB` chunked memory/disk `StreamCache` with concurrent head + tail (`moov`) pre-warming, single-flight coalescing, and `BandwidthLimiter`-throttled read-ahead prefetching.
+- **Custom Open-With Format Rules (`opendrive-core/src/open_rules.rs`, `desktop/modals/open_rules_{ui,actions}.rs`)**: `Settings::open_with_rules` supporting extension, media-group (`@video`, `@image`, `@pdf`, `@audio`, `@code`, `@archive`), and wildcard (`*`) matching, duplicate/overlap validation, searchable Settings rule editor with native app picker, and direct localhost stream URL handoff for streaming players (`vlc`, `mpv`, `iina`, `ffplay`, etc.).
+- **Driverless Windows `This PC` Namespace, Clean Quota Guards & OS Mount Exit Safety (`opendrive-platform/src/{explorer_quota,mount_cleanup}.rs`, `runtime/mount_manager/live.rs`)**: `HKCU` `This PC` Explorer namespace registration (`sync_this_pc_namespace`), clean quota guards hiding misleading storage totals when any account reports unknown/unlimited quota, and automatic CFAPI/virtual-drive/`This PC` cleanup on normal exit, `Ctrl+C`/console close, or hard kill via detached `--mount-watchdog` + `mount-owner.pid` PID-ownership guard and flushed Shell PIDL notifications (no File Explorer restart needed).
+- **Smart Viewport-Aware Tooltips (`design/tooltip.rs`)**: Neo-Cel tooltips on buttons, switches, checkboxes, and status badges that automatically flip and shift inside viewport bounds.
+- **Expanded Explorer, File-Op & Streaming CLI (`runtime/{cli,cli_commands,cli_self_check}.rs`)**: Added `explore`, `sync-down`, `sync-up`, `sync-clear`, `open-item [--dry-run]`, `stream [--probe]`, `rename`, `rm|delete`, `cp|copy`, `mv|move`, and an expanded `--self-check` suite (`stream=206`).
+
+### Changed
+
+- **Native Titlebar & Control Center UI Refinements (`desktop/titlebar.rs`, `desktop/bento.rs`, `design/icons.rs`, `design/logo.rs`)**: Unified Pause/Resume into a single toggle button in both Sync Pulse and the native titlebar (icon-only), cloned the Settings button into the native titlebar (icon-only with tooltip) beside a thin vertical divider separating app actions from window controls, upgraded `IconKind::Settings` to a 6-tooth mechanical cogwheel, added 3-accent-color (`ThemeColor`) vs monochrome (`ThemeMono`) theme-switcher vector icons, improved compact titlebar wrapping (`< 460px`), and refined Explorer/Settings layouts (left-aligned wrapped search bar, Upload dropdown left of Refresh, steady action bar width preventing double-click shifts, Open-With Rule `Cancel`/`Save` top-right).
+- **95% Coverage & Zero-Exception LOC Quality Gate (`scripts/test-coverage-{rust,node}.mjs`, `scripts/loc-lint.mjs`)**: Raised both Rust (`cargo llvm-cov`) and Node (`c8`) coverage thresholds to `95%` (Lines, Functions, Regions/Branches), enforced tracked + untracked LOC limits (`<= 300` `.rs`, `<= 350` `.mjs`), and expanded unit and integration test suites across all workspace crates.
+
+### Fixed
+
+- **OAuth & Service Account Re-auth Flows (`desktop/auth_handlers.rs`, `runtime/auth_runner/*`, `opendrive-auth/src/loopback.rs`)**: Preserved account folder names while updating nickname/read-only state, prevented leaking OAuth credentials into Service Account re-auth flows, fixed pending browser-auth `Sign In`/`Copy Link` routing, and eliminated nested Tokio `block_on` during async avatar caching.
+- **Drive Hydration, Shared Items & Cache Reconciliation (`opendrive-sync/src/{hydrate,poller}.rs`, `opendrive-drive`)**: Resolved canonical real root IDs, surfaced unparented top-level files and `Shared with me` shortcuts, pruned remotely deleted clean children, and invalidated stale disk/stream cache entries on MD5/revision changes.
+- **Windows Multi-Account CFAPI & Mount Isolation (`opendrive-fs-windows/src/{lib,provider,cfapi_sys}.rs`, `runtime/mount_manager/*`)**: Isolated per-account CFAPI root nodes (`connect_live_at`, `ProviderBridge::with_root`), sanitized sync root IDs, and guarded legacy `subst` cleanup so unrelated user drives are never unmounted.
+
 ## [v0.1.0] - 2026-11-19
 
 ### Added

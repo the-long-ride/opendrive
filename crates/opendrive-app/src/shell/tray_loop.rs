@@ -43,6 +43,7 @@ pub fn run_tray(bridge: Bridge) -> anyhow::Result<()> {
                         tracing::info!("tray: resume all");
                     }
                     TrayAction::Quit => {
+                        bridge.mounts().shutdown_all();
                         let _ = bridge.handle_blocking(AppCommand::Quit);
                         break;
                     }
