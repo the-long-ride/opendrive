@@ -144,7 +144,7 @@ fn modals_layout_subtitle_removal_and_titlebar_bottom_work() {
     for needle in [
         "Google Cloud Console Setup Guide",
         "Option A — Browser Sign-In (OAuth 2.0 Desktop App)",
-        "Create or select a Google Cloud project",
+        "Choose Personal or External OAuth",
         "Open Google Cloud Console",
     ] {
         assert!(guide_texts.iter().any(|t| t == needle));
