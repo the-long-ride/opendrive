@@ -16,10 +16,10 @@ members = [
 default-members = ["crates/opendrive-app"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
-authors = ["OpenDrive Contributors"]
+authors = ["the-long-ride"]
 repository = "https://github.com/the-long-ride/opendrive"
 
 [workspace.dependencies]

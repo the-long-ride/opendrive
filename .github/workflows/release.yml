@@ -85,6 +85,8 @@ jobs:
           !define VERSION "__VER__"
           Name "${APPNAME} ${VERSION}"
           OutFile "dist\opendrive-__TAG__-windows-x86_64-setup.exe"
+          Icon "docs\assets\opendrive.ico"
+          UninstallIcon "docs\assets\opendrive.ico"
           InstallDir "$LOCALAPPDATA\OpenDrive"
           RequestExecutionLevel user
           Page directory
@@ -138,28 +140,38 @@ jobs:
           BIN="target/x86_64-unknown-linux-gnu/release/opendrive"
           mkdir -p dist/portable
           cp "$BIN" README.md PRIVACY.md dist/portable/
+          cp docs/assets/opendrive-logo.svg dist/portable/opendrive.svg
+          cp docs/assets/opendrive-logo.png dist/portable/opendrive.png
+          cat > dist/portable/opendrive.desktop <<'EOF'
+          [Desktop Entry]
+          Type=Application
+          Name=OpenDrive
+          Exec=opendrive
+          Icon=opendrive
+          Categories=Network;FileTransfer;
+          Terminal=false
+          EOF
           tar -C dist/portable -czf "dist/opendrive-${TAG}-linux-x86_64.tar.gz" .
 
           DEB_ROOT="dist/deb/opendrive_${VER}_amd64"
-          mkdir -p "${DEB_ROOT}/DEBIAN" "${DEB_ROOT}/usr/bin" "${DEB_ROOT}/usr/share/applications"
+          mkdir -p "${DEB_ROOT}/DEBIAN" "${DEB_ROOT}/usr/bin" "${DEB_ROOT}/usr/share/applications" \
+            "${DEB_ROOT}/usr/share/icons/hicolor/scalable/apps" \
+            "${DEB_ROOT}/usr/share/icons/hicolor/512x512/apps" \
+            "${DEB_ROOT}/usr/share/pixmaps"
           install -m 0755 "$BIN" "${DEB_ROOT}/usr/bin/opendrive"
+          cp docs/assets/opendrive-logo.svg "${DEB_ROOT}/usr/share/icons/hicolor/scalable/apps/opendrive.svg"
+          cp docs/assets/opendrive-logo.png "${DEB_ROOT}/usr/share/icons/hicolor/512x512/apps/opendrive.png"
+          cp docs/assets/opendrive-logo.png "${DEB_ROOT}/usr/share/pixmaps/opendrive.png"
           cat > "${DEB_ROOT}/DEBIAN/control" <<EOF
           Package: opendrive
           Version: ${VER}
           Section: net
           Priority: optional
           Architecture: amd64
-          Maintainer: OpenDrive Contributors
+          Maintainer: the-long-ride
           Description: Pure-Rust multi-account Google Drive desktop client
           EOF
-          cat > "${DEB_ROOT}/usr/share/applications/opendrive.desktop" <<'EOF'
-          [Desktop Entry]
-          Type=Application
-          Name=OpenDrive
-          Exec=opendrive
-          Categories=Network;FileTransfer;
-          Terminal=false
-          EOF
+          cp dist/portable/opendrive.desktop "${DEB_ROOT}/usr/share/applications/opendrive.desktop"
           dpkg-deb --build "$DEB_ROOT" "dist/opendrive_${VER}_amd64.deb"
 
           APPDIR="dist/OpenDrive.AppDir"
@@ -167,6 +179,8 @@ jobs:
           install -m 0755 "$BIN" "${APPDIR}/usr/bin/opendrive"
           cp "${DEB_ROOT}/usr/share/applications/opendrive.desktop" "${APPDIR}/opendrive.desktop"
           cp docs/assets/opendrive-logo.svg "${APPDIR}/opendrive.svg"
+          cp docs/assets/opendrive-logo.png "${APPDIR}/opendrive.png"
+          cp docs/assets/opendrive-logo.png "${APPDIR}/.DirIcon"
           cat > "${APPDIR}/AppRun" <<'EOF'
           #!/bin/sh
           HERE="$(dirname "$(readlink -f "$0")")"
@@ -202,14 +216,22 @@ jobs:
           TAG="${{ needs.gate.outputs.tag }}"
           VER="${{ needs.gate.outputs.version }}"
           BIN="target/aarch64-apple-darwin/release/opendrive"
-          mkdir -p dist/portable
-          cp "$BIN" README.md PRIVACY.md dist/portable/
-          ditto -c -k --keepParent dist/portable "dist/opendrive-${TAG}-macos-arm64-portable.zip"
+          ICONSET="dist/AppIcon.iconset"
+          mkdir -p "$ICONSET"
+          for sz in 16 32 128 256 512; do
+            sips -z "$sz" "$sz" docs/assets/opendrive-logo.png --out "$ICONSET/icon_${sz}x${sz}.png" >/dev/null
+          done
+          for sz in 16 32 128 256 512; do
+            dbl=$((sz * 2))
+            sips -z "$dbl" "$dbl" docs/assets/opendrive-logo.png --out "$ICONSET/icon_${sz}x${sz}@2x.png" >/dev/null
+          done
+          iconutil -c icns "$ICONSET" -o dist/AppIcon.icns
 
           APP_DIR="dist/dmg/OpenDrive.app"
           mkdir -p "${APP_DIR}/Contents/MacOS" "${APP_DIR}/Contents/Resources"
           cp "$BIN" "${APP_DIR}/Contents/MacOS/opendrive"
           chmod +x "${APP_DIR}/Contents/MacOS/opendrive"
+          cp dist/AppIcon.icns "${APP_DIR}/Contents/Resources/AppIcon.icns"
           cat > "${APP_DIR}/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -219,9 +241,16 @@ jobs:
             <key>CFBundleVersion</key><string>${VER}</string>
             <key>CFBundleShortVersionString</key><string>${VER}</string>
             <key>CFBundleExecutable</key><string>opendrive</string>
+            <key>CFBundleIconFile</key><string>AppIcon</string>
             <key>CFBundlePackageType</key><string>APPL</string>
           </dict></plist>
           EOF
+
+          mkdir -p dist/portable
+          cp -R "${APP_DIR}" dist/portable/OpenDrive.app
+          cp README.md PRIVACY.md dist/portable/
+          ditto -c -k --keepParent dist/portable "dist/opendrive-${TAG}-macos-arm64-portable.zip"
+
           ln -s /Applications dist/dmg/Applications
           hdiutil create -volname "OpenDrive ${TAG}" -srcfolder dist/dmg -ov -format UDZO "dist/opendrive-${TAG}-macos-arm64-installer.dmg"
       - uses: actions/upload-artifact@v4
@@ -246,56 +275,22 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
       - name: Generate checksums, release notes, and publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.gate.outputs.tag }}
+          VERSION: ${{ needs.gate.outputs.version }}
+          REF_SHA: ${{ needs.gate.outputs.ref_sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_API_URL: ${{ github.api_url }}
+          OUTPUT_PATH: release-notes.md
         shell: bash
         run: |
-          TAG="${{ needs.gate.outputs.tag }}"
-          VER="${{ needs.gate.outputs.version }}"
-          REF_SHA="${{ needs.gate.outputs.ref_sha }}"
           (cd release-assets && sha256sum * > SHA256SUMS.txt)
-
-          CHANGELOG_BODY=$(awk -v tag="$TAG" -v ver="$VER" '
-            $0 ~ "^## \\[" tag "\\]" || $0 ~ "^## \\[" ver "\\]" || $0 ~ "^## " tag { flag=1; next }
-            flag && $0 ~ "^## " { exit }
-            flag { print }
-          ' CHANGELOG.md)
-          if [ -z "$CHANGELOG_BODY" ]; then
-            CHANGELOG_BODY="Release ${TAG}."
-          fi
-
-          PREV_TAG=$(git describe --tags --abbrev=0 "${REF_SHA}^" 2>/dev/null || true)
-          if [ -n "$PREV_TAG" ]; then
-            CONTRIB=$(git log "${PREV_TAG}..${REF_SHA}" --format="- %an" | sort -u)
-          else
-            CONTRIB=$(git log "${REF_SHA}" --format="- %an" | sort -u)
-          fi
-
-          {
-            echo "Change log for version ${TAG}:"
-            echo "<details>"
-            echo "<summary>Release notes for ${TAG}</summary>"
-            echo ""
-            echo "$CHANGELOG_BODY"
-            echo ""
-            echo "</details>"
-            echo ""
-            echo "Download assets:"
-            echo "| OS | Package | File |"
-            echo "|---|---|---|"
-            echo "| Windows (x86_64) | NSIS Installer | \`opendrive-${TAG}-windows-x86_64-setup.exe\` |"
-            echo "| Windows (x86_64) | Portable ZIP | \`opendrive-${TAG}-windows-x86_64-portable.zip\` |"
-            echo "| macOS (Apple Silicon) | DMG Installer | \`opendrive-${TAG}-macos-arm64-installer.dmg\` |"
-            echo "| macOS (Apple Silicon) | Portable ZIP | \`opendrive-${TAG}-macos-arm64-portable.zip\` |"
-            echo "| Linux (x86_64) | AppImage | \`opendrive-${TAG}-linux-x86_64.AppImage\` |"
-            echo "| Linux (x86_64) | Debian (.deb) | \`opendrive_${VER}_amd64.deb\` |"
-            echo "| Linux (x86_64) | Portable Tarball | \`opendrive-${TAG}-linux-x86_64.tar.gz\` |"
-            echo "| All | Checksums | \`SHA256SUMS.txt\` |"
-            echo ""
-            echo "Contributors:"
-            echo "$CONTRIB"
-          } > release-notes.md
+          node scripts/generate-release-notes.mjs
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "OpenDrive ${TAG}" --notes-file release-notes.md

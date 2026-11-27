@@ -7,8 +7,8 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-opendrive-store = { path = "../opendrive-store", version = "0.2.0" }
-opendrive-drive = { path = "../opendrive-drive", version = "0.2.0" }
+opendrive-store = { path = "../opendrive-store", version = "0.3.0" }
+opendrive-drive = { path = "../opendrive-drive", version = "0.3.0" }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
@@ -20,7 +20,7 @@ uuid = { workspace = true }
 parking_lot = { workspace = true }
 
 [dev-dependencies]
-opendrive-fake-drive = { path = "../opendrive-fake-drive", version = "0.2.0" }
+opendrive-fake-drive = { path = "../opendrive-fake-drive", version = "0.3.0" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
