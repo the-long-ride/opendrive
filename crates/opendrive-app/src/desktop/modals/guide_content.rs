@@ -15,7 +15,10 @@ pub(super) const OAUTH_STEPS: &[StepItem] = &[
             &[
                 ("For one Google account, find ", false),
                 ("Quick setup for personal use (Personal mode)", true),
-                (" in Google Cloud Help and create a Desktop app client.", false),
+                (
+                    " in Google Cloud Help and create a Desktop app client.",
+                    false,
+                ),
             ],
             &[
                 ("Enable Drive API in Step 2, then go to Step 6.", false),
@@ -27,12 +30,21 @@ pub(super) const OAUTH_STEPS: &[StepItem] = &[
             &[
                 ("Personal mode still requires a ", false),
                 ("Client ID and Client Secret", true),
-                (". Sign in as the Google account that created the app.", false),
+                (
+                    ". Sign in as the Google account that created the app.",
+                    false,
+                ),
             ],
             &[
-                ("For multiple accounts or an existing External project, use ", false),
+                (
+                    "For multiple accounts or an existing External project, use ",
+                    false,
+                ),
                 ("External", true),
-                (" and follow all steps. To create a project, click the ", false),
+                (
+                    " and follow all steps. To create a project, click the ",
+                    false,
+                ),
                 ("project picker", true),
                 (" (top-left) -> ", false),
                 ("New Project", true),
