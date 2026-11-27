@@ -6,14 +6,14 @@ kind: "feature"
 status: "verified"
 summary: "Thin reqwest-based Google Drive v3 client (about, shared drives, file listing, byte-range download, changes feed, resumable uploads, metadata/trash mutations, 429 backoff) and an in-process HTTP/1.1 test double."
 tags: ["drive-v3", "http", "resumable-upload", "changes", "backoff", "fake-drive", "testing"]
-source_paths: ["crates/opendrive-drive/src/client.rs", "crates/opendrive-drive/src/lib.rs", "crates/opendrive-drive/src/retry.rs", "crates/opendrive-drive/src/transfer.rs", "crates/opendrive-drive/src/types.rs", "crates/opendrive-drive/tests/drive_coverage_tests.rs", "crates/opendrive-drive/tests/drive_http_tests.rs", "crates/opendrive-drive/tests/drive_shared_tests.rs", "crates/opendrive-fake-drive/src/extras.rs", "crates/opendrive-fake-drive/src/http.rs", "crates/opendrive-fake-drive/src/lib.rs", "crates/opendrive-fake-drive/src/server.rs", "crates/opendrive-fake-drive/src/types.rs", "crates/opendrive-fake-drive/tests/fake_drive_tests.rs"]
+source_paths: ["crates/opendrive-drive/src/client.rs", "crates/opendrive-drive/src/lib.rs", "crates/opendrive-drive/src/retry.rs", "crates/opendrive-drive/src/token.rs", "crates/opendrive-drive/src/transfer.rs", "crates/opendrive-drive/src/types.rs", "crates/opendrive-drive/tests/drive_coverage_tests.rs", "crates/opendrive-drive/tests/drive_http_tests.rs", "crates/opendrive-drive/tests/drive_shared_tests.rs", "crates/opendrive-drive/tests/token_refresh_tests.rs", "crates/opendrive-fake-drive/src/extras.rs", "crates/opendrive-fake-drive/src/http.rs", "crates/opendrive-fake-drive/src/lib.rs", "crates/opendrive-fake-drive/src/server.rs", "crates/opendrive-fake-drive/src/types.rs", "crates/opendrive-fake-drive/tests/fake_drive_tests.rs"]
 related_specs: ["feature.oauth-credentials", "workflow.sync-hydration-conflicts"]
-last_doc_update_at: "2026-11-26T07:07:19Z"
-last_verified_at: "2026-11-26T07:07:19Z"
-last_verified_code_commit: "aa2135c5d17ce0016d4fa42bb2c2705bbba7c709"
+last_doc_update_at: "2026-11-26T18:05:00Z"
+last_verified_at: "2026-11-26T18:05:00Z"
+last_verified_code_commit: "91d18b7a858b4edc92690c91562150ceb6622d5a"
 last_source_change_commit: "600d2df0ad0c4d97420d87fa94048e4eac1b8129"
 last_source_change_at: "2026-11-26T14:29:37+07:00"
-source_fingerprint: "sha256:932a0d4b67a976834d7710158917f5c3ab342159f01dd58faed55372bee83798"
+source_fingerprint: "sha256:37d4177c7d89c85a43219a8f1981aa0de7d341df95652c88bf98bf90aa488a9b"
 ---
 
 # Google Drive v3 HTTP client and in-process fake Drive server
@@ -27,7 +27,7 @@ Out of scope: OAuth token acquisition/refresh (`opendrive-auth`), local SQLite p
 ## Observable behavior
 
 ### `DriveClient` API and error mapping (`opendrive-drive`)
-- `DriveClient::new(access_token)` targets `https://www.googleapis.com/drive/v3` and `https://www.googleapis.com/upload/drive/v3`; `with_base_urls` overrides both bases (trailing `/` trimmed).
+- `DriveClient::new(access_token)` targets `https://www.googleapis.com/drive/v3` and `https://www.googleapis.com/upload/drive/v3`; `with_base_urls` overrides both bases (trailing `/` trimmed). `with_token_refresher` and `with_proactive_refresh_age` wire `TokenStore` (`token.rs`), which proactively refreshes via `TokenRefresher` after 50 minutes (or `proactive_age`) and performs single-flight `refresh_after_unauthorized` retry on HTTP `401` (coalescing concurrent requests via `refresh_gate`, exposed on `send_authed`/`send_authed_json` and `access_token()`). `403` never triggers refresh.
 - HTTP status mapping in `DriveClient::check`:
   - `401` or `403` -> `DriveError::Auth`
   - `429` -> `DriveError::RateLimited`
@@ -58,12 +58,13 @@ Out of scope: OAuth token acquisition/refresh (`opendrive-auth`), local SQLite p
 - `FakeDriveServer::start(Arc<FakeDrive>)` binds `127.0.0.1:0` and serves HTTP/1.1 routes `/drive/v3/about`, `/drive/v3/drives`, `/drive/v3/files`, `/drive/v3/files/{id}`, `/drive/v3/files/{id}/copy` (`POST` server-side file copy), `PATCH /drive/v3/files/{id}` (`addParents`/`removeParents`/`name`/`trashed`), `/drive/v3/changes/startPageToken`, `/drive/v3/changes`, `/upload/drive/v3/files`, `/upload/session/{sid}`, and `/assets/*`. On each request, `drive.take_error()` is checked first (draining `error_queue` before `forced_error`) to inject HTTP error statuses.
 
 ## Code map
-- `crates/opendrive-drive/src/lib.rs` — crate exports for `DriveClient`, `with_backoff`, `is_native_google_doc`, and Drive data types.
+- `crates/opendrive-drive/src/lib.rs` — crate exports for `DriveClient`, `TokenRefresher`, `TokenFuture`, `with_backoff`, `is_native_google_doc`, and Drive data types.
+- `crates/opendrive-drive/src/token.rs` — `TokenRefresher`, `TokenFuture`, `TokenStore` (50m proactive refresh + single-flight `401` coalescing), and `execute_authed_request`.
 - `crates/opendrive-drive/src/types.rs` — `DriveError`, `FileJson`, `ShortcutDetailsJson`, `DriveFile` (with `owned_by_me`, `shared_with_me`, `shortcut_target_id`, `shortcut_target_mime`), `About` (with `photo_url`), `FileList`, `SharedDrive`, `SharedDriveList`, `ChangeList`, `Change`, `is_native_google_doc`.
 - `crates/opendrive-drive/src/retry.rs` — `with_backoff` and 4 unit tests.
-- `crates/opendrive-drive/src/client.rs` — `DriveClient` core, `check`, `send_json`, `about`, `list_shared_drives`, `list_files`, `list_shared_with_me`, `download_range`, `download_bytes`, `native_doc_link`.
+- `crates/opendrive-drive/src/client.rs` — `DriveClient` core, `with_token_refresher`, `with_proactive_refresh_age`, `access_token`, `check`, `send_authed`, `send_authed_json`, `about`, `list_shared_drives`, `list_files`, `list_shared_with_me`, `download_range`, `download_bytes`, `native_doc_link`.
 - `crates/opendrive-drive/src/transfer.rs` — `root_folder_id`, `list_top_unparented_files`, `get_start_page_token`, `changes`, `create_resumable`, `upload_chunk`, `trash`, `update_metadata`, `copy_file`, `move_file`.
-- `crates/opendrive-drive/tests/{drive_coverage_tests,drive_http_tests,drive_shared_tests}.rs` — HTTP/TCP mock integration tests covering `about`, shared drives, `list_top_unparented_files`, `list_shared_with_me`, `shortcutDetails`, `download_bytes`/`download_range` truncated-body errors, resumable uploads, and backoff.
+- `crates/opendrive-drive/tests/{drive_coverage_tests,drive_http_tests,drive_shared_tests,token_refresh_tests}.rs` — HTTP/TCP mock integration tests covering `about`, shared drives, `list_top_unparented_files`, `list_shared_with_me`, `shortcutDetails`, `download_bytes`/`download_range` truncated-body errors, resumable uploads, backoff, and `401`/proactive/concurrent token refresh.
 - `crates/opendrive-fake-drive/src/lib.rs` — `FakeDrive` in-memory state and mutation/fault-injection methods.
 - `crates/opendrive-fake-drive/src/extras.rs` — `FakeDrive` extension methods (`set_photo_url`, `photo_url`, `mark_shared_with_me`, `list_shared_with_me`, `set_shortcut`, `set_static_asset`, `get_static_asset`, `mark_unowned`, `set_root_real_id`, `root_real_id`, `list_not_in_root`, `file_to_json`, `copy_file`, `patch_parents`).
 - `crates/opendrive-fake-drive/src/types.rs` — `FakeFile`, `FakeSharedDrive`, `FakeAbout`, `FakeChange`, `UploadSession`, `FakeExtras`, `file_to_json`, `bump_rev`.

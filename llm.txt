@@ -1,0 +1,64 @@
+# OpenDrive Support & Troubleshooting Reference (`llm.txt`)
+
+> Repository: https://github.com/the-long-ride/opendrive
+> Author: `the-long-ride`
+> Changelog: https://github.com/the-long-ride/opendrive/blob/main/CHANGELOG.md
+
+OpenDrive is a free, open-source, multi-account Google Drive desktop client built in pure Rust (`eframe` / `egui`). It uses each user's own Google Cloud OAuth 2.0 Desktop credentials or Service Account JSON keys, stores secrets in the OS keyring (`SecretStore`) or `.odcred` encrypted backups, and mounts Google Drive without custom kernel drivers:
+
+- **Windows:** Windows Cloud Files API (`CFAPI`) + optional **This PC → Devices and drives** OpenDrive icon + Google Drive cloud quota entry (double-click to open the OpenDrive root folder; no console window in release builds — use the in-app **Terminal** icon button to inspect logs).
+- **UI Fonts:** In Settings, open the **UI Font** dropdown (with built-in `"Search installed fonts..."` box) to pick an installed font or **Reset Font**, enter a Google Font family name, paste a public `https://` font/CDN URL (downloads over the internet), or click **Browse** for a local `.ttf`/`.otf`/`.ttc` file.
+- **Cloud Explorer Scopes:** Switch between **My Drive** and **Shared with me** directly from the Explorer root breadcrumb dropdown (`Shared with me` is an independent top-level scope rather than a subfolder inside `My Drive`).
+- **macOS:** Built-in localhost `NFSv3` (`nfsserve`).
+- **Linux:** Standard userspace `FUSE3`.
+
+## Where Logs & Settings Live
+
+- **In-App Terminal & Logs:** Click the **Terminal (`>_`)** icon button in the top titlebar (left of **Settings**):
+  - **Tab 1 — Terminal Log:** Live credential-masked console/tracing output (equivalent to the background process log).
+  - **Tab 2 — App Logs:** Structured diagnostic entries with timestamps, severity (`INFO`/`WARN`/`ERROR`), `OD-*` error/warning codes, and remediation hints.
+  - All OAuth secrets, refresh/access tokens, Service Account private keys, vault passwords, and OAuth Client ID prefixes are masked before display or copy.
+- **Default OS Paths:**
+  - **Windows:** `%APPDATA%\opendrive` (config), `%LOCALAPPDATA%\opendrive` (cache/DB), `%USERPROFILE%\OpenDrive` (mount root)
+  - **macOS:** `~/Library/Application Support/opendrive`, `~/Library/Caches/opendrive`, `~/OpenDrive`
+  - **Linux:** `~/.config/opendrive`, `~/.local/share/opendrive`, `~/OpenDrive`
+
+## Error & Warning Code Reference
+
+| Code | Severity | Title | Recommended Fix |
+| --- | --- | --- | --- |
+| `OD-AUTH-001` | ERROR | Invalid or rejected OAuth client credentials | Open Re-auth -> **Credentials** and verify Client ID & Client Secret from Google Cloud Console (Desktop App). |
+| `OD-AUTH-002` | ERROR | OAuth token expired or revoked | Background polling/Drive calls auto-refresh at 50m and on HTTP 401; if refresh fails, click **Sign In** on the account card (publish OAuth consent screen if hitting the 7-day Testing limit). |
+| `OD-AUTH-003` | WARN | Browser launch or loopback redirect interrupted | Use **Copy Link** to open the Google OAuth URL in a browser manually and verify `127.0.0.1` loopback is allowed. |
+| `OD-AUTH-004` | ERROR | Service Account JSON or JWT exchange failed | Verify the `.json` key format, system clock (NTP), and Drive folder sharing with `client_email`. |
+| `OD-AUTH-005` | ERROR | OS keyring or secret store unavailable | Unlock the OS keyring / secret service or restore via encrypted `.odcred` backup. |
+| `OD-AUTH-006` | WARN | Account requires re-authentication | Use **Sign In** or **Credentials** on the account row. |
+| `OD-SYNC-001` | ERROR | Google Drive API request or sync failure | Check internet connectivity and click **Refresh**. |
+| `OD-SYNC-002` | ERROR | Insufficient Drive scope or permission (403) | Enable Google Drive API, add `https://www.googleapis.com/auth/drive` in Data Access, Save, and re-authenticate. |
+| `OD-SYNC-003` | WARN | Sync conflict detected | Open the folder and choose between the local file and conflict sibling copy. |
+| `OD-SYNC-004` | ERROR | Local replica or SQLite cache error | Check disk space/permissions or click **Purge Unpinned Cache** in Settings. |
+| `OD-SYNC-005` | WARN | Rate limited by Google Drive API (429) | Wait briefly while exponential backoff retries automatically. |
+| `OD-MNT-001` | ERROR | OS virtual filesystem mount failed | Check `libfuse3` (Linux), loopback NFS (macOS), or Windows Cloud Files permissions and ensure no stale lock remains. |
+| `OD-MNT-002` | WARN | Windows This PC namespace registration failed | Toggle **Show OpenDrive in This PC** in Settings. |
+| `OD-MNT-003` | WARN | Remote mount sync interrupted | Click **Refresh** or inspect account status on the dashboard. |
+| `OD-STRM-001` | ERROR | Localhost 206 media stream server error | Retry opening the media file or verify the account is connected. |
+| `OD-STRM-002` | WARN | Custom Open-With launcher failed | Verify the executable path or command in **Settings -> Open With Rules**. |
+| `OD-CFG-001` | ERROR | Settings or account configuration persistence error | Ensure the OpenDrive config directory is writable. |
+| `OD-CFG-002` | ERROR | Encrypted `.odcred` vault backup/restore failed | Confirm the vault password (9+ chars: upper, lower, digit, symbol) and file readability. |
+| `OD-CFG-003` | WARN | GitHub release check failed | Check HTTPS access to `api.github.com` and retry **Check Now** in Settings. |
+| `OD-FONT-001` | ERROR | Invalid or unsupported UI font file or family | Select an installed system font, enter a valid Google Font family name (e.g. `Inter`), or browse for a valid `.ttf`/`.otf`/`.ttc` file. |
+| `OD-FONT-002` | WARN | Font download or persistence failed | Check network access to `fonts.googleapis.com` or import a local font file. |
+
+## CLI Quick Reference
+
+```bash
+opendrive ui                                      # Launch desktop Control Center (default)
+opendrive status                                  # Show connected accounts & config path
+opendrive explore <account> [remote_path]         # List Drive folder contents
+opendrive sync-down <account> <remote_path>       # Download and pin item locally
+opendrive sync-up <account> <local_path> [parent] # Upload file or folder recursively
+opendrive sync-clear <account> <remote_path>      # Upload/verify remote, then clear local copy
+opendrive open-item [--dry-run] <account> <path>  # Resolve or launch item via Open-With rules
+opendrive stream [--probe] <account> <path>       # Print localhost 206 stream URL (or probe range)
+opendrive --self-check                            # Run end-to-end runtime self-check
+```
