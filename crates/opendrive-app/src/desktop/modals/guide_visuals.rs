@@ -20,7 +20,7 @@ const OAUTH_FLOW: &[FlowNode] = &[
     FlowNode {
         step: "2",
         title: "Auth Screen",
-        detail: "Test user + scope",
+        detail: "Personal / External",
     },
     FlowNode {
         step: "3",
@@ -47,7 +47,7 @@ const SA_FLOW: &[FlowNode] = &[
     },
     FlowNode {
         step: "3",
-        title: "Share Folder",
+        title: "Drive Access",
         detail: "Add client_email",
     },
     FlowNode {
