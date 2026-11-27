@@ -2,7 +2,25 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'assets/**'
+      - '**/*.md'
+      - '**/*.mdx'
+      - '**/*.txt'
+      - '**/*.rst'
+      - 'LICENSE'
+      - '.agents/**'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'assets/**'
+      - '**/*.md'
+      - '**/*.mdx'
+      - '**/*.txt'
+      - '**/*.rst'
+      - 'LICENSE'
+      - '.agents/**'
   workflow_call:
 permissions:
   contents: read

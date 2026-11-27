@@ -13,7 +13,7 @@ last_verified_at: "2026-11-26T17:06:00Z"
 last_verified_code_commit: "91d18b7a858b4edc92690c91562150ceb6622d5a"
 last_source_change_commit: "375147183a37010b7d5c8bd91768ec7c3dd44fab"
 last_source_change_at: "2026-11-26T19:20:18+07:00"
-source_fingerprint: "sha256:3309c43b9bfd49edf5abb497a5dcdfd01ce79ecb99d93b0f2d840af4fa06616a"
+source_fingerprint: "sha256:fb68cf2adcd65cea24922ea79443e886eef5f3b8fd8cbd67abaf6b964fa218cd"
 ---
 
 # SQLite metadata store, cache index, and upload queue

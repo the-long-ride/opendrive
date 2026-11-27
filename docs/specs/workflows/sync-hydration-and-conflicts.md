@@ -13,7 +13,7 @@ last_verified_at: "2026-11-27T11:15:00Z"
 last_verified_code_commit: "563d57aa9649b5368a31ef5aa96171d0453d30dc"
 last_source_change_commit: "375147183a37010b7d5c8bd91768ec7c3dd44fab"
 last_source_change_at: "2026-11-26T19:20:18+07:00"
-source_fingerprint: "sha256:033e4965d522614a969ab4a818ed4c31200f872b0efa6da27d0e3fecd4ab6c76"
+source_fingerprint: "sha256:8d6d10fb57291b1eb13d2fa3d4de2d0a7063bdea6fa995e87f9df340887ca6a0"
 ---
 
 # Sync engine, folder hydration, upload queue worker, eviction, and conflict handling

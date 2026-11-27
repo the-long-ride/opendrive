@@ -13,7 +13,7 @@ last_verified_at: "2026-11-27T02:21:00Z"
 last_verified_code_commit: "91d18b7a858b4edc92690c91562150ceb6622d5a"
 last_source_change_commit: "375147183a37010b7d5c8bd91768ec7c3dd44fab"
 last_source_change_at: "2026-11-26T19:20:18+07:00"
-source_fingerprint: "sha256:5682ac160c3d26dfed63d0586df6f857c0e94395cc84b9b6028fa06c0c41af06"
+source_fingerprint: "sha256:7f98e3fe2988d227de50317c94726efcebf76a29320199767314746eda276ecd"
 ---
 
 # Workspace core domain, settings, and platform integration

@@ -21,9 +21,30 @@ fn register_sync_root_fails_when_parent_is_a_file_and_unregister_missing_os_root
     // Safe on nonexistent path: SyncRootId::from_path returns Err without mutating any OS root.
     unregister_os_sync_root(&base.join("nonexistent-sync-root"));
     #[cfg(not(windows))]
-    opendrive_fs_windows::unregister_all_opendrive_roots();
+    {
+        opendrive_fs_windows::unregister_all_opendrive_roots();
+        assert!(!opendrive_fs_windows::unregister_os_sync_root_by_account(
+            "cov-missing"
+        ));
+    }
 
     let _ = std::fs::remove_dir_all(&base);
+}
+
+#[cfg(windows)]
+struct LiveRootGuard {
+    acct: String,
+    live_root: std::path::PathBuf,
+    base: std::path::PathBuf,
+}
+
+#[cfg(windows)]
+impl Drop for LiveRootGuard {
+    fn drop(&mut self) {
+        let _ = opendrive_fs_windows::unregister_os_sync_root_by_account(&self.acct);
+        unregister_os_sync_root(&self.live_root);
+        let _ = std::fs::remove_dir_all(&self.base);
+    }
 }
 
 #[cfg(windows)]
@@ -63,15 +84,17 @@ async fn connect_live_returns_error_early_when_root_path_is_blocked() {
         ],
     );
     // Unregistered directory hits convert error-log branch safely; live connect on temp sync root converts plain dirs/files!
+    let acct = format!("cov-{}", Uuid::new_v4());
     let live_root = base.join("live_reconcile_root");
+    let guard = LiveRootGuard {
+        acct: acct.clone(),
+        live_root: live_root.clone(),
+        base: base.clone(),
+    };
     let nested = live_root.join("04-Audio Common").join("00-Music");
     std::fs::create_dir_all(&nested).unwrap();
     std::fs::write(nested.join("song.mp3"), b"mp3").unwrap();
-    if let Ok(_conn) = frontend.connect_live(
-        live_root.to_str().unwrap(),
-        &format!("cov-{}", Uuid::new_v4()),
-        handle,
-    ) {
+    if let Ok(_conn) = frontend.connect_live(live_root.to_str().unwrap(), &acct, handle) {
         let entries = vec![
             (std::path::PathBuf::from("04-Audio Common"), 10, true),
             (
@@ -93,7 +116,6 @@ async fn connect_live_returns_error_early_when_root_path_is_blocked() {
             &[std::path::PathBuf::from("04-Audio Common")],
         );
     }
-    unregister_os_sync_root(&live_root);
-
-    let _ = std::fs::remove_dir_all(&base);
+    drop(guard);
+    assert!(!base.exists(), "test leaked temp root: {}", base.display());
 }

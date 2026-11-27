@@ -8,7 +8,7 @@ use cloud_filter::metadata::Metadata;
 use cloud_filter::placeholder::Placeholder;
 use cloud_filter::placeholder_create_info::PlaceholderCreateInfo;
 use cloud_filter::root::{Connection, HydrationType, PopulationType, ProtectionMode};
-use cloud_filter::root::{SecurityId, Session, SyncRootIdBuilder, SyncRootInfo};
+use cloud_filter::root::{SecurityId, Session, SyncRootId, SyncRootIdBuilder, SyncRootInfo};
 use cloud_filter::utility::WriteAt;
 use opendrive_sync::NodeId;
 use std::path::{Component, Path, PathBuf};
@@ -20,17 +20,27 @@ const CF_CHUNK_SIZE: u64 = 1024 * 1024;
 const PLACEHOLDER_BATCH_SIZE: usize = 64;
 const DEFAULT_ICON: &str = "%SystemRoot%\\system32\\shell32.dll,-16769";
 
+fn build_sync_root_id(provider: &str, account: &str) -> Result<SyncRootId, String> {
+    let sid = SecurityId::current_user().map_err(|e| e.to_string())?;
+    let safe = crate::sanitize_sync_root_account(account);
+    Ok(SyncRootIdBuilder::new(provider)
+        .user_security_id(sid)
+        .account_name(&safe)
+        .build())
+}
+
+pub fn unregister_account_sync_root(account: &str) -> bool {
+    build_sync_root_id(crate::SYNC_ROOT_PROVIDER, account)
+        .and_then(|id| id.unregister().map_err(|e| e.to_string()))
+        .is_ok()
+}
+
 pub fn connect_sync_root(
     identity: &SyncRootIdentity,
     bridge: Arc<ProviderBridge>,
     rt: tokio::runtime::Handle,
 ) -> Result<Connection<CfSyncFilter>, String> {
-    let sid = SecurityId::current_user().map_err(|e| e.to_string())?;
-    let safe_acct = crate::sanitize_sync_root_account(&identity.account_name);
-    let root_id = SyncRootIdBuilder::new(&identity.provider_name)
-        .user_security_id(sid)
-        .account_name(&safe_acct)
-        .build();
+    let root_id = build_sync_root_id(&identity.provider_name, &identity.account_name)?;
     let icon = identity.icon_resource.as_deref().unwrap_or(DEFAULT_ICON);
     let reg = root_id.is_registered().map_err(|e| e.to_string())?;
     let same_icon = root_id
@@ -140,11 +150,11 @@ impl CfSyncFilter {
             self.resolve_path_node(parent_rel)
         };
         if let (Some(np), Some(nn)) = (np, target_path.file_name()) {
-            let ok = self
+            if self
                 .rt
                 .block_on(self.bridge.rename_entry(node_id, np, nn))
-                .is_ok();
-            if ok {
+                .is_ok()
+            {
                 self.bridge.remove_path(src_rel);
                 self.bridge.index_path(dst_rel, node_id);
             }
@@ -181,10 +191,10 @@ impl SyncFilter for CfSyncFilter {
         };
         while offset < end {
             let chunk_len = ((end - offset).min(CF_CHUNK_SIZE)) as u32;
-            let res = self
+            let bytes = match self
                 .rt
-                .block_on(self.bridge.fetch_data(node_id, offset, chunk_len));
-            let bytes = match res {
+                .block_on(self.bridge.fetch_data(node_id, offset, chunk_len))
+            {
                 Ok(b) if !b.is_empty() => b,
                 Ok(_) => return Err(fail_fetch(&ticket, CloudErrorKind::Unsuccessful)),
                 Err(e) => {
@@ -219,11 +229,7 @@ impl SyncFilter for CfSyncFilter {
                 CloudErrorKind::NetworkUnavailable
             })?;
         let entries = deduplicate_windows_names(raw_entries);
-        let parent_dir = if rel_parent.as_os_str().is_empty() {
-            self.root_path.clone()
-        } else {
-            self.root_path.join(&rel_parent)
-        };
+        let parent_dir = self.root_path.join(&rel_parent);
         let mut batch = Vec::new();
         for (name, child_id, is_dir, size) in entries {
             self.bridge.index_path(rel_parent.join(&name), child_id);
@@ -276,15 +282,17 @@ impl SyncFilter for CfSyncFilter {
     }
 
     fn rename(&self, request: Request, ticket: ticket::Rename, info: info::Rename) -> CResult<()> {
-        if info.source_in_scope() {
-            if let Some(node_id) = self.resolve_request_node(&request) {
-                let src_rel = self.rel_path(&request.path());
-                if info.target_in_scope() {
-                    self.handle_in_scope_rename(node_id, &src_rel, &info.target_path());
-                } else {
-                    let _ = self.rt.block_on(self.bridge.delete_entry(node_id));
-                    self.bridge.remove_path(&src_rel);
-                }
+        if let Some(node_id) = info
+            .source_in_scope()
+            .then(|| self.resolve_request_node(&request))
+            .flatten()
+        {
+            let src_rel = self.rel_path(&request.path());
+            if info.target_in_scope() {
+                self.handle_in_scope_rename(node_id, &src_rel, &info.target_path());
+            } else {
+                let _ = self.rt.block_on(self.bridge.delete_entry(node_id));
+                self.bridge.remove_path(&src_rel);
             }
         }
         ticket.pass().map_err(|_| CloudErrorKind::Unsuccessful)

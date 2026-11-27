@@ -183,9 +183,7 @@ impl CloudFilesFrontend {
 
 pub fn try_dehydrate_placeholder(path: &Path) -> bool {
     #[cfg(windows)]
-    {
-        cfapi_sys::dehydrate_placeholder(path)
-    }
+    return cfapi_sys::dehydrate_placeholder(path);
     #[cfg(not(windows))]
     {
         let _ = path;
@@ -198,6 +196,16 @@ pub fn unregister_os_sync_root(path: &Path) {
     let _ = cloud_filter::root::SyncRootId::from_path(path).and_then(|id| id.unregister());
     #[cfg(not(windows))]
     let _ = path;
+}
+
+pub fn unregister_os_sync_root_by_account(account_name: &str) -> bool {
+    #[cfg(windows)]
+    return cfapi_sys::unregister_account_sync_root(account_name);
+    #[cfg(not(windows))]
+    {
+        let _ = account_name;
+        false
+    }
 }
 
 pub fn unregister_all_opendrive_roots() {
@@ -271,22 +279,16 @@ mod tests {
         );
         let id = SyncRootIdentity::new("a", r1.clone()).with_icon_resource("app.ico,0");
         assert_eq!(id.icon_resource.as_deref(), Some("app.ico,0"));
-        let mut frontend = CloudFilesFrontend::new(engine).with_icon_resource("fe.ico,0");
-        frontend
-            .register_sync_root_at(r1.to_str().unwrap(), "alice", 42)
+        let mut fe = CloudFilesFrontend::new(engine).with_icon_resource("fe.ico,0");
+        fe.register_sync_root_at(r1.to_str().unwrap(), "alice", 42)
             .unwrap();
-        frontend
-            .register_sync_root(r2.to_str().unwrap(), "bob")
-            .unwrap();
-        assert_eq!(frontend.bridges[0].root_node(), 42);
-        assert_eq!(
-            frontend.roots()[0].icon_resource.as_deref(),
-            Some("fe.ico,0")
-        );
+        fe.register_sync_root(r2.to_str().unwrap(), "bob").unwrap();
+        assert_eq!(fe.bridges[0].root_node(), 42);
+        assert_eq!(fe.roots()[0].icon_resource.as_deref(), Some("fe.ico,0"));
         CloudFilesFrontend::reconcile_placeholders(&r1, &[PathBuf::from("sub")]);
         CloudFilesFrontend::reconcile_placeholder_entries(&r1, &[(PathBuf::from("sub"), 42, true)]);
-        frontend.unregister_sync_root(r2.to_str().unwrap()).unwrap();
-        assert_eq!(frontend.roots().len(), 1);
+        fe.unregister_sync_root(r2.to_str().unwrap()).unwrap();
+        assert_eq!(fe.roots().len(), 1);
         let _ = std::fs::remove_dir_all(base);
     }
 }

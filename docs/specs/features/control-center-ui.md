@@ -13,7 +13,7 @@ last_verified_at: "2026-11-27T11:15:00Z"
 last_verified_code_commit: "563d57aa9649b5368a31ef5aa96171d0453d30dc"
 last_source_change_commit: "375147183a37010b7d5c8bd91768ec7c3dd44fab"
 last_source_change_at: "2026-11-26T19:20:18+07:00"
-source_fingerprint: "sha256:ed0d30c771732875295d04b9e16c30037b7cff584f2ea173081228567d93998b"
+source_fingerprint: "sha256:3fc29ac482eb2b55fb32fa239c4083a8292be725148b0aa4001f3a35e7de50c8"
 ---
 # Native Control Center Desktop UI
 

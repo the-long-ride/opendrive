@@ -12,11 +12,14 @@
     "lint:loc": "node scripts/loc-lint.mjs",
     "lint:dead": "knip",
     "lint:rust": "cargo clippy --workspace --all-targets --locked -- -D warnings && cargo clippy --workspace --exclude opendrive-app --lib --no-deps --locked -- -D unused-crate-dependencies && cargo clippy -p opendrive-app --all-targets --features tray --locked -- -D warnings",
+    "validate:specs": "node scripts/validate-specs.mjs",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "prepare": "git config core.hooksPath .githooks || true",
     "test:scripts": "node --test scripts/test/*.test.mjs",
     "test:coverage:node": "node scripts/test-coverage-node.mjs",
     "test:coverage:rust": "node scripts/test-coverage-rust.mjs",
     "test:coverage": "npm run test:coverage:node && npm run test:coverage:rust",
-    "test:gate": "npm run format:check && npm run lint && npm run test:scripts && npm run test:coverage"
+    "test:gate": "npm run format:check && npm run lint && npm run validate:specs && npm run test:scripts && npm run test:coverage"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

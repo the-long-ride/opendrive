@@ -13,7 +13,7 @@ last_verified_at: "2026-11-26T18:05:00Z"
 last_verified_code_commit: "91d18b7a858b4edc92690c91562150ceb6622d5a"
 last_source_change_commit: "600d2df0ad0c4d97420d87fa94048e4eac1b8129"
 last_source_change_at: "2026-11-26T14:29:37+07:00"
-source_fingerprint: "sha256:37d4177c7d89c85a43219a8f1981aa0de7d341df95652c88bf98bf90aa488a9b"
+source_fingerprint: "sha256:ec98c5522fe480e0a72ad7082e6271ea5b00c8a2fa8853cd9e5c196e0071a876"
 ---
 
 # Google Drive v3 HTTP client and in-process fake Drive server
