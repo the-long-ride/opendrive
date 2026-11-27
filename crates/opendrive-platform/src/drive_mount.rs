@@ -1,8 +1,10 @@
 //! Windows virtual drive letter mounting via `subst`, `DriveIcons`, and Shell drive notifications.
 
+use crate::drive_letter::normalize_drive_letter;
+#[cfg(windows)]
 use crate::drive_letter::{
     drive_icon_reg_command, drive_label_reg_command, drive_mount_command, drive_unmount_command,
-    normalize_drive_letter, parse_subst_target, paths_match, pick_available_drive_letter,
+    parse_subst_target, paths_match, pick_available_drive_letter,
 };
 use crate::{ExplorerQuota, PlatformError, Result};
 use std::path::Path;
