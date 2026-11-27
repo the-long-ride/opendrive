@@ -2,6 +2,7 @@
 
 use crate::client::{DriveClient, FILE_FIELDS};
 use crate::types::{Change, ChangeList, DriveError, DriveFile, FileJson, Result};
+use bytes::Bytes;
 use serde::Deserialize;
 
 impl DriveClient {
@@ -13,10 +14,14 @@ impl DriveClient {
         }
         crate::retry::with_backoff(
             || async move {
-                let req = self
-                    .auth(self.http.get(format!("{}/files/root", self.api_base)))
-                    .query(&[("fields", "id"), ("supportsAllDrives", "true")]);
-                let body: Resp = self.send_json(req).await?;
+                let body: Resp = self
+                    .send_authed_json(|tok| {
+                        self.http
+                            .get(format!("{}/files/root", self.api_base))
+                            .bearer_auth(tok)
+                            .query(&[("fields", "id"), ("supportsAllDrives", "true")])
+                    })
+                    .await?;
                 Ok(body.id)
             },
             5,
@@ -52,13 +57,14 @@ impl DriveClient {
             #[serde(rename = "startPageToken")]
             start_page_token: String,
         }
-        let req = self
-            .auth(
+        let body: Resp = self
+            .send_authed_json(|tok| {
                 self.http
-                    .get(format!("{}/changes/startPageToken", self.api_base)),
-            )
-            .query(&[("supportsAllDrives", "true")]);
-        let body: Resp = self.send_json(req).await?;
+                    .get(format!("{}/changes/startPageToken", self.api_base))
+                    .bearer_auth(tok)
+                    .query(&[("supportsAllDrives", "true")])
+            })
+            .await?;
         Ok(body.start_page_token)
     }
 
@@ -80,15 +86,19 @@ impl DriveClient {
         }
         let fields =
             format!("nextPageToken,newStartPageToken,changes(fileId,removed,file({FILE_FIELDS}))");
-        let req = self
-            .auth(self.http.get(format!("{}/changes", self.api_base)))
-            .query(&[
-                ("pageToken", page_token),
-                ("supportsAllDrives", "true"),
-                ("includeItemsFromAllDrives", "true"),
-                ("fields", fields.as_str()),
-            ]);
-        let body: Resp = self.send_json(req).await?;
+        let body: Resp = self
+            .send_authed_json(|tok| {
+                self.http
+                    .get(format!("{}/changes", self.api_base))
+                    .bearer_auth(tok)
+                    .query(&[
+                        ("pageToken", page_token),
+                        ("supportsAllDrives", "true"),
+                        ("includeItemsFromAllDrives", "true"),
+                        ("fields", fields.as_str()),
+                    ])
+            })
+            .await?;
         let changes = body
             .changes
             .unwrap_or_default()
@@ -112,17 +122,15 @@ impl DriveClient {
 
     pub async fn create_resumable(&self, metadata: &serde_json::Value) -> Result<String> {
         let resp = self
-            .auth(
+            .send_authed(|tok| {
                 self.http
                     .post(format!("{}/files", self.upload_base))
-                    .query(&[("uploadType", "resumable"), ("supportsAllDrives", "true")]),
-            )
-            .header("Content-Type", "application/json; charset=UTF-8")
-            .json(metadata)
-            .send()
-            .await
-            .map_err(|e| DriveError::Http(e.to_string()))?;
-        let resp = self.check(resp).await?;
+                    .bearer_auth(tok)
+                    .query(&[("uploadType", "resumable"), ("supportsAllDrives", "true")])
+                    .header("Content-Type", "application/json; charset=UTF-8")
+                    .json(metadata)
+            })
+            .await?;
         resp.headers()
             .get("location")
             .and_then(|v| v.to_str().ok())
@@ -168,17 +176,14 @@ impl DriveClient {
     }
 
     pub async fn trash(&self, file_id: &str) -> Result<()> {
-        let resp = self
-            .auth(
-                self.http
-                    .patch(format!("{}/files/{file_id}", self.api_base)),
-            )
-            .query(&[("supportsAllDrives", "true")])
-            .json(&serde_json::json!({ "trashed": true }))
-            .send()
-            .await
-            .map_err(|e| DriveError::Http(e.to_string()))?;
-        self.check(resp).await?;
+        self.send_authed(|tok| {
+            self.http
+                .patch(format!("{}/files/{file_id}", self.api_base))
+                .bearer_auth(tok)
+                .query(&[("supportsAllDrives", "true")])
+                .json(&serde_json::json!({ "trashed": true }))
+        })
+        .await?;
         Ok(())
     }
 
@@ -187,26 +192,28 @@ impl DriveClient {
         file_id: &str,
         patch: &serde_json::Value,
     ) -> Result<DriveFile> {
-        let req = self
-            .auth(
+        let f: FileJson = self
+            .send_authed_json(|tok| {
                 self.http
-                    .patch(format!("{}/files/{file_id}", self.api_base)),
-            )
-            .query(&[("supportsAllDrives", "true"), ("fields", FILE_FIELDS)])
-            .json(patch);
-        let f: FileJson = self.send_json(req).await?;
+                    .patch(format!("{}/files/{file_id}", self.api_base))
+                    .bearer_auth(tok)
+                    .query(&[("supportsAllDrives", "true"), ("fields", FILE_FIELDS)])
+                    .json(patch)
+            })
+            .await?;
         Ok(f.into())
     }
 
     pub async fn copy_file(&self, file_id: &str, name: &str, parent_id: &str) -> Result<DriveFile> {
-        let req = self
-            .auth(
+        let f: FileJson = self
+            .send_authed_json(|tok| {
                 self.http
-                    .post(format!("{}/files/{file_id}/copy", self.api_base)),
-            )
-            .query(&[("supportsAllDrives", "true"), ("fields", FILE_FIELDS)])
-            .json(&serde_json::json!({ "name": name, "parents": [parent_id] }));
-        let f: FileJson = self.send_json(req).await?;
+                    .post(format!("{}/files/{file_id}/copy", self.api_base))
+                    .bearer_auth(tok)
+                    .query(&[("supportsAllDrives", "true"), ("fields", FILE_FIELDS)])
+                    .json(&serde_json::json!({ "name": name, "parents": [parent_id] }))
+            })
+            .await?;
         Ok(f.into())
     }
 
@@ -229,14 +236,52 @@ impl DriveClient {
             Some(n) => serde_json::json!({ "name": n }),
             None => serde_json::json!({}),
         };
-        let req = self
-            .auth(
+        let f: FileJson = self
+            .send_authed_json(|tok| {
                 self.http
-                    .patch(format!("{}/files/{file_id}", self.api_base)),
-            )
-            .query(&q)
-            .json(&body);
-        let f: FileJson = self.send_json(req).await?;
+                    .patch(format!("{}/files/{file_id}", self.api_base))
+                    .bearer_auth(tok)
+                    .query(&q)
+                    .json(&body)
+            })
+            .await?;
         Ok(f.into())
+    }
+
+    pub async fn download_bytes(&self, url: &str) -> Result<Vec<u8>> {
+        let resp = self
+            .http
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))?;
+        let resp = self.check(resp).await?;
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| DriveError::Http(e.to_string()))
+    }
+
+    pub async fn download_range(&self, file_id: &str, offset: u64, len: u32) -> Result<Bytes> {
+        if len == 0 {
+            return Ok(Bytes::new());
+        }
+        let end = offset.saturating_add(len as u64).saturating_sub(1);
+        let resp = self
+            .send_authed(|tok| {
+                self.http
+                    .get(format!("{}/files/{file_id}", self.api_base))
+                    .bearer_auth(tok)
+                    .query(&[("alt", "media")])
+                    .header("Range", format!("bytes={offset}-{end}"))
+            })
+            .await?;
+        let status = resp.status().as_u16();
+        if status != 200 && status != 206 {
+            return Ok(Bytes::new());
+        }
+        resp.bytes()
+            .await
+            .map_err(|e| DriveError::Http(e.to_string()))
     }
 }

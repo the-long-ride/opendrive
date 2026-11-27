@@ -203,22 +203,20 @@ async fn shared_with_me_shortcuts_and_offline_placeholder_errors() {
         .unwrap();
     assert!(matches!(broken.kind, Kind::Shortcut));
 
-    // Verify virtual "Shared with me" folder is hydrated on list.
-    let shared_root = engine
+    assert!(engine
         .lookup(root, OsStr::new("Shared with me"))
         .await
         .unwrap()
+        .is_none());
+    let shared_root_id = engine.seed_shared_with_me_root(acct).unwrap();
+    let shared_root = engine.stat(shared_root_id).await.unwrap();
+    let swm_node = engine
+        .store()
+        .lock()
+        .get_node(shared_root.id as i64)
+        .unwrap()
         .unwrap();
-    assert_eq!(
-        engine
-            .store()
-            .lock()
-            .get_node(shared_root.id as i64)
-            .unwrap()
-            .unwrap()
-            .drive_id,
-        SHARED_WITH_ME_DRIVE_ID
-    );
+    assert_eq!(swm_node.drive_id, SHARED_WITH_ME_DRIVE_ID);
     let shared_page = engine.list(shared_root.id, None).await.unwrap();
     assert_eq!(shared_page.entries.len(), 1);
     assert_eq!(shared_page.entries[0].name, "Shared Novels");
@@ -249,12 +247,12 @@ async fn shared_with_me_survives_poll_changes_and_repairs_orphaned_cached_state(
     engine.set_drive_client(acct, client);
     let root = engine.seed_root_account(acct, "Root").unwrap();
     engine.hydrate_folder(acct, root).await.unwrap();
-    let swm_id = engine
+    let swm_in_root = engine
         .lookup(root, OsStr::new("Shared with me"))
         .await
-        .unwrap()
-        .unwrap()
-        .id;
+        .unwrap();
+    assert!(swm_in_root.is_none());
+    let swm_id = engine.seed_shared_with_me_root(acct).unwrap();
 
     let first = engine
         .list_explorer_nodes(acct, swm_id, false)

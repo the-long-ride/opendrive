@@ -72,11 +72,12 @@ async fn cloud_and_local_delete_rename_copy_move_and_guards() {
     let id_of = |nodes: &[opendrive_store::Node], n: &str| {
         nodes.iter().find(|x| x.name == n).unwrap().id as u64
     };
+    assert!(!top.iter().any(|x| x.name == "Shared with me"));
     let src_id = id_of(&top, "Source");
     let dst_id = id_of(&top, "Archive");
     let f_cloud = id_of(&top, "cloud.txt");
     let f_loc = id_of(&top, "local.txt");
-    let swm_id = id_of(&top, "Shared with me");
+    let swm_id = eng.seed_shared_with_me_root(acct_id).unwrap();
     let acct_mnt = mount.join("A");
     std::fs::create_dir_all(&acct_mnt).unwrap();
 

@@ -77,7 +77,8 @@ async fn hydrate_folder_prunes_deleted_clean_children_and_keeps_dirty() {
     assert!(refreshed.iter().any(|n| n.name == "keep.txt"));
     assert!(refreshed.iter().any(|n| n.name == "dirty.txt"));
     assert!(refreshed.iter().any(|n| n.name == "local-new.txt"));
-    assert!(refreshed.iter().any(|n| n.name == "Shared with me"));
+    assert!(!refreshed.iter().any(|n| n.name == "Shared with me"));
+    assert!(eng.seed_shared_with_me_root(acct).is_ok());
     assert!(!refreshed.iter().any(|n| n.name == "gone.txt"));
 
     assert!(!Path::new(&cp).exists());

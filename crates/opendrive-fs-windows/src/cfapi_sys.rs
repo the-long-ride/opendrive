@@ -1,10 +1,11 @@
 //! Live Windows Cloud Files (`cloud-filter` 0.0.7) `SyncFilter` adapter and root helpers.
 
+use crate::cfapi_placeholders::{deduplicate_windows_names, ensure_existing_placeholder};
 use crate::{ProviderBridge, SyncRootIdentity};
 use cloud_filter::error::{CResult, CloudErrorKind};
 use cloud_filter::filter::{info, ticket, Request, SyncFilter};
 use cloud_filter::metadata::Metadata;
-use cloud_filter::placeholder::{Placeholder, UpdateOptions};
+use cloud_filter::placeholder::Placeholder;
 use cloud_filter::placeholder_create_info::PlaceholderCreateInfo;
 use cloud_filter::root::{Connection, HydrationType, PopulationType, ProtectionMode};
 use cloud_filter::root::{SecurityId, Session, SyncRootIdBuilder, SyncRootInfo};
@@ -12,7 +13,7 @@ use cloud_filter::utility::WriteAt;
 use opendrive_sync::NodeId;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, warn};
 
 const CF_BLOCK_ALIGN: u64 = 4096;
 const CF_CHUNK_SIZE: u64 = 1024 * 1024;
@@ -60,28 +61,16 @@ pub fn connect_sync_root(
         .map_err(|e| e.to_string())
 }
 
-pub fn reconcile_placeholder_dirs(root_path: &Path, rel_dirs: &[PathBuf]) {
-    let opts = UpdateOptions::default().has_children().mark_in_sync();
-    let dirs =
-        std::iter::once(root_path.to_path_buf()).chain(rel_dirs.iter().map(|r| root_path.join(r)));
-    for dir in dirs {
-        if dir.is_dir() {
-            if let Ok(mut ph) = Placeholder::open(&dir) {
-                let _ = ph.update(opts.clone(), None);
-            }
-        }
-    }
-}
-
 pub fn dehydrate_placeholder(path: &Path) -> bool {
+    use cloud_filter::placeholder::UpdateOptions;
     if !path.is_file() {
         return false;
     }
-    let Ok(mut ph) = Placeholder::options().exclusive().open(path) else {
+    let Ok(mut ph) = Placeholder::options().exclusive().write_access().open(path) else {
         return false;
     };
     let opts = UpdateOptions::default().dehydrate();
-    ph.info().is_ok() && ph.update(opts, None).is_ok()
+    matches!(ph.info(), Ok(Some(_))) && ph.update(opts, None).is_ok()
 }
 
 pub struct CfSyncFilter {
@@ -92,15 +81,21 @@ pub struct CfSyncFilter {
 
 impl CfSyncFilter {
     fn rel_path(&self, full_path: &Path) -> PathBuf {
-        if let Ok(rel) = full_path.strip_prefix(&self.root_path) {
+        let strip_ver = |p: &Path| -> PathBuf {
+            let s = p.to_string_lossy();
+            PathBuf::from(s.strip_prefix(r"\\?\").unwrap_or(&s))
+        };
+        let norm_full = strip_ver(full_path);
+        let norm_root = strip_ver(&self.root_path);
+        if let Ok(rel) = norm_full.strip_prefix(&norm_root) {
             return rel.to_path_buf();
         }
-        let root_lower = self.root_path.to_string_lossy().to_ascii_lowercase();
-        let full_str = full_path.to_string_lossy();
+        let root_lower = norm_root.to_string_lossy().to_ascii_lowercase();
+        let full_str = norm_full.to_string_lossy();
         if full_str.to_ascii_lowercase().starts_with(&root_lower) {
             return PathBuf::from(full_str[root_lower.len()..].trim_start_matches(['\\', '/']));
         }
-        full_path.to_path_buf()
+        norm_full
     }
 
     fn resolve_path_node(&self, rel: &Path) -> Option<NodeId> {
@@ -216,34 +211,47 @@ impl SyncFilter for CfSyncFilter {
             .resolve_request_node(&request)
             .unwrap_or_else(|| self.bridge.root_node());
         let rel_parent = self.rel_path(&request.path());
-        let entries = self
+        let raw_entries = self
             .rt
             .block_on(self.bridge.fetch_placeholders(parent_id))
             .map_err(|e| {
                 error!(?e, parent_id, "fetch_placeholders failed");
                 CloudErrorKind::NetworkUnavailable
             })?;
-        let mut batch: Vec<PlaceholderCreateInfo> = entries
-            .into_iter()
-            .map(|(name, child_id, is_dir, size)| {
-                self.bridge.index_path(rel_parent.join(&name), child_id);
-                let meta = if is_dir {
-                    Metadata::directory()
-                } else {
-                    Metadata::file().size(size)
-                };
+        let entries = deduplicate_windows_names(raw_entries);
+        let parent_dir = if rel_parent.as_os_str().is_empty() {
+            self.root_path.clone()
+        } else {
+            self.root_path.join(&rel_parent)
+        };
+        let mut batch = Vec::new();
+        for (name, child_id, is_dir, size) in entries {
+            self.bridge.index_path(rel_parent.join(&name), child_id);
+            let child_path = parent_dir.join(&name);
+            if child_path.exists() {
+                ensure_existing_placeholder(&child_path, child_id, is_dir, is_dir);
+                continue;
+            }
+            let meta = if is_dir {
+                Metadata::directory()
+            } else {
+                Metadata::file().size(size)
+            };
+            batch.push(
                 PlaceholderCreateInfo::new(&name)
                     .metadata(meta)
                     .blob(child_id.to_le_bytes().to_vec())
-                    .mark_in_sync()
-            })
-            .collect();
-        let err_u = |_| CloudErrorKind::Unsuccessful;
+                    .mark_in_sync(),
+            );
+        }
         if batch.is_empty() {
-            ticket.pass_with_placeholders(&mut []).map_err(err_u)?;
+            let _ = ticket.pass_with_placeholders(&mut []);
+            return Ok(());
         }
         for chunk in batch.chunks_mut(PLACEHOLDER_BATCH_SIZE) {
-            ticket.pass_with_placeholders(chunk).map_err(err_u)?;
+            if let Err(err) = ticket.pass_with_placeholders(chunk) {
+                warn!(?err, parent_id, "partial placeholder batch error");
+            }
         }
         Ok(())
     }

@@ -76,6 +76,7 @@ fn account_manager_and_io_roundtrip() {
         ignored_release_version: Some("v0.2.0".into()),
         open_with_rules: Vec::new(),
         explorer_folder_cache: true,
+        ui_font_family: Some("Inter".into()),
     };
     save_settings(&dir, &settings).unwrap();
     assert!(settings_path(&dir).exists());

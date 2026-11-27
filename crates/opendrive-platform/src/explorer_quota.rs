@@ -4,7 +4,7 @@ use crate::{open_path, PlatformError, Result};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-const FOLDER_SHORTCUT_CLSID: &str = "{0AFACED1-E828-11D1-9187-B532F1E9575D}";
+const FILE_SYSTEM_FOLDER_CLSID: &str = "{0E5AAE11-A475-4c5b-AB00-C66DE400274E}";
 #[cfg(windows)]
 const OPENDRIVE_NAMESPACE_CLSID: &str = "{D84E7B21-6F4A-4D89-9C1E-5A2B3C4D5E6F}";
 const CLSID_KEY: &str = r"HKCU\Software\Classes\CLSID\{D84E7B21-6F4A-4D89-9C1E-5A2B3C4D5E6F}";
@@ -29,9 +29,11 @@ pub fn compute_explorer_quota(used_and_quotas: &[(u64, u64)]) -> Option<Explorer
         if q == 0 || q < u {
             return None;
         }
-        used = used.saturating_add(u);
-        total = total.saturating_add(q);
-        free = free.saturating_add(q - u);
+        (used, total, free) = (
+            used.saturating_add(u),
+            total.saturating_add(q),
+            free.saturating_add(q - u),
+        );
     }
     Some(ExplorerQuota { used, total, free })
 }
@@ -46,57 +48,50 @@ pub fn format_bytes_compact(bytes: u64) -> String {
         val /= 1024.0;
         idx += 1;
     }
-    if idx == 0 || val >= 10.0 {
-        format!("{val:.0} {}", UNITS[idx])
-    } else {
-        format!("{val:.1} {}", UNITS[idx])
-    }
+    let p = usize::from(idx > 0 && val < 10.0);
+    format!("{val:.p$} {}", UNITS[idx])
 }
 
 pub fn format_explorer_quota_label(quota: Option<ExplorerQuota>) -> String {
-    match quota {
-        None => "OpenDrive".into(),
-        Some(q) => format!(
-            "OpenDrive ({} / {})",
-            format_bytes_compact(q.used),
-            format_bytes_compact(q.total)
-        ),
-    }
+    let Some(q) = quota else {
+        return "OpenDrive".into();
+    };
+    let (u, t) = (format_bytes_compact(q.used), format_bytes_compact(q.total));
+    format!("OpenDrive ({u} / {t})")
 }
 
 pub fn format_explorer_tile_comment(quota: Option<ExplorerQuota>) -> Option<String> {
-    quota.map(|q| {
-        format!(
-            "{} free of {} ({} used)",
-            format_bytes_compact(q.free),
-            format_bytes_compact(q.total),
-            format_bytes_compact(q.used)
-        )
-    })
+    let q = quota?;
+    let (f, t, u) = (
+        format_bytes_compact(q.free),
+        format_bytes_compact(q.total),
+        format_bytes_compact(q.used),
+    );
+    Some(format!("{f} free of {t} ({u} used)"))
 }
 
-fn reg_add_key(key: &str, value_name: Option<&str>, kind: &str, data: &str) -> Vec<String> {
-    let mut args = vec!["add".into(), key.into()];
-    match value_name {
-        Some(v) => args.extend(["/v".into(), v.into()]),
+fn reg_add_key(k: &str, v: Option<&str>, t: &str, d: &str) -> Vec<String> {
+    let mut args = vec!["add".into(), k.into()];
+    match v {
+        Some(n) => args.extend(["/v".into(), n.into()]),
         None => args.push("/ve".into()),
     }
-    args.extend(["/t", kind, "/d", data, "/f"].map(Into::into));
+    args.extend(["/t", t, "/d", d, "/f"].map(Into::into));
     args
 }
 
-fn reg_add(subkey: &str, value_name: Option<&str>, kind: &str, data: &str) -> Vec<String> {
-    let key = if subkey.is_empty() {
+fn reg_add(sub: &str, v: Option<&str>, t: &str, d: &str) -> Vec<String> {
+    let k = if sub.is_empty() {
         CLSID_KEY.into()
     } else {
-        format!(r"{CLSID_KEY}\{subkey}")
+        format!(r"{CLSID_KEY}\{sub}")
     };
-    reg_add_key(&key, value_name, kind, data)
+    reg_add_key(&k, v, t, d)
 }
 
-fn reg_delete(key: &str, value_name: Option<&str>) -> Vec<String> {
+fn reg_delete(key: &str, val: Option<&str>) -> Vec<String> {
     let mut args = vec!["delete".into(), key.into()];
-    if let Some(v) = value_name {
+    if let Some(v) = val {
         args.extend(["/v".into(), v.into()]);
     }
     args.push("/f".into());
@@ -111,34 +106,40 @@ pub fn build_this_pc_reg_commands(
     quota: Option<ExplorerQuota>,
 ) -> Vec<Vec<String>> {
     if !enabled {
-        return vec![
-            reg_delete(NAMESPACE_KEY, None),
-            reg_delete(DESKTOP_NAMESPACE_KEY, None),
-            reg_delete(CLSID_KEY, None),
-        ];
+        return [NAMESPACE_KEY, DESKTOP_NAMESPACE_KEY, CLSID_KEY]
+            .into_iter()
+            .map(|k| reg_delete(k, None))
+            .collect();
     }
     let mut cmds = vec![reg_add("", None, "REG_SZ", "OpenDrive")];
-    if let Some(comment) = format_explorer_tile_comment(quota) {
-        let tile = Some("TileInfo");
-        cmds.push(reg_add("", tile, "REG_SZ", "prop:System.Comment"));
-        cmds.push(reg_add("", Some("System.Comment"), "REG_SZ", &comment));
-    } else {
-        cmds.push(reg_delete(CLSID_KEY, Some("TileInfo")));
-        cmds.push(reg_delete(CLSID_KEY, Some("System.Comment")));
+    match format_explorer_tile_comment(quota) {
+        Some(c) => cmds.extend([
+            reg_add("", Some("TileInfo"), "REG_SZ", "prop:System.Comment"),
+            reg_add("", Some("System.Comment"), "REG_SZ", &c),
+        ]),
+        None => cmds.extend([
+            reg_delete(CLSID_KEY, Some("TileInfo")),
+            reg_delete(CLSID_KEY, Some("System.Comment")),
+        ]),
     }
 
-    let (icon_type, icon_val) = match icon_ico {
-        Some(ico) => ("REG_SZ", format!("{},0", ico.display())),
-        None => ("REG_EXPAND_SZ", SHELL32_ICON.into()),
-    };
+    let (icon_type, icon_val) = icon_ico.map_or(("REG_EXPAND_SZ", SHELL32_ICON.into()), |ico| {
+        ("REG_SZ", format!("{},0", ico.display()))
+    });
     let target_str = target.display().to_string();
-    let (ips, bag) = ("InProcServer32", r"Instance\InitPropertyBag");
+    let (ips, bag, fsf) = (
+        "InProcServer32",
+        r"Instance\InitPropertyBag",
+        FILE_SYSTEM_FOLDER_CLSID,
+    );
     for (s, v, k, d) in [
         ("DefaultIcon", None, icon_type, icon_val.as_str()),
         (ips, None, "REG_EXPAND_SZ", SHELL32),
         (ips, Some("ThreadingModel"), "REG_SZ", "Apartment"),
-        ("Instance", Some("CLSID"), "REG_SZ", FOLDER_SHORTCUT_CLSID),
+        ("Instance", Some("CLSID"), "REG_SZ", fsf),
+        (bag, Some("Attributes"), "REG_DWORD", "0x11"),
         (bag, Some("TargetFolderPath"), "REG_SZ", &target_str),
+        ("ShellFolder", Some("FolderValueFlags"), "REG_DWORD", "0x28"),
         ("ShellFolder", Some("Attributes"), "REG_DWORD", "0xf080004d"),
     ] {
         cmds.push(reg_add(s, v, k, d));
@@ -168,8 +169,9 @@ fn sync_this_pc_with(
         std::fs::create_dir_all(target)
             .map_err(|e| PlatformError::Other(format!("create {}: {e}", target.display())))?;
     }
-    for args in build_this_pc_reg_commands(enabled, target, icon_ico, quota) {
-        run(&args)?;
+    let args = build_this_pc_reg_commands(enabled, target, icon_ico, quota);
+    for row in args {
+        run(&row)?;
     }
     Ok(())
 }
@@ -182,12 +184,13 @@ pub fn sync_this_pc_namespace(
 ) -> Result<()> {
     #[cfg(windows)]
     {
+        let r = |a: &[String]| run_reg_cmd("reg", a);
         if enabled {
-            sync_this_pc_with(true, target, icon_ico, quota, |a| run_reg_cmd("reg", a))?;
+            sync_this_pc_with(true, target, icon_ico, quota, r)?;
         } else {
             crate::mount_cleanup::remove_namespace_with_shell_notify(
                 OPENDRIVE_NAMESPACE_CLSID,
-                || sync_this_pc_with(false, target, icon_ico, quota, |a| run_reg_cmd("reg", a)),
+                || sync_this_pc_with(false, target, icon_ico, quota, r),
             )?;
         }
         crate::notify_shell_mounts_changed();
@@ -204,8 +207,8 @@ pub fn sync_this_pc_namespace(
 }
 
 fn split_command_tokens(raw: &str) -> Result<Vec<String>> {
-    let (mut tokens, mut current) = (Vec::new(), String::new());
-    let (mut active_quote, mut had_token) = (None::<char>, false);
+    let (mut tokens, mut current, mut active_quote, mut had_token) =
+        (Vec::new(), String::new(), None::<char>, false);
     for ch in raw.chars() {
         match active_quote {
             Some(q) if ch == q => active_quote = None,
@@ -281,17 +284,17 @@ mod tests {
 
     #[test]
     fn sync_this_pc_with_and_run_reg_cmd_branches() {
-        let base = std::env::temp_dir().join(format!("od-eq-{}", std::process::id()));
-        let target = base.join("OpenDrive");
+        let dir = std::env::temp_dir().join(format!("od-eq-{}", std::process::id()));
+        let t = dir.join("OpenDrive");
         let ok = |_: &[String]| Ok(());
-        let fail = |_: &[String]| Err(PlatformError::Other("e".into()));
-        sync_this_pc_with(true, &target, None, None, ok).unwrap();
-        sync_this_pc_with(false, &target, None, None, ok).unwrap();
-        assert!(sync_this_pc_with(false, &target, None, None, fail).is_err());
-        let v = |s: &[&str]| s.iter().map(|x| (*x).into()).collect::<Vec<String>>();
+        sync_this_pc_with(true, &t, None, None, ok).unwrap();
+        sync_this_pc_with(false, &t, None, None, ok).unwrap();
+        let err = |_: &[String]| Err(PlatformError::Other("e".into()));
+        assert!(sync_this_pc_with(false, &t, None, None, err).is_err());
+        let v = |s: &[&str]| s.iter().map(|x| (*x).into()).collect::<Vec<_>>();
         assert!(run_reg_cmd("cmd", &v(&["/C", "echo ok"])).is_ok());
         assert!(run_reg_cmd("cmd", &v(&["/C", "exit /b 1"])).is_err());
         assert!(run_reg_cmd("cmd", &v(&["delete", "/C", "exit /b 1"])).is_ok());
-        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

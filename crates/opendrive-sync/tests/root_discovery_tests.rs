@@ -166,13 +166,14 @@ async fn root_discovers_real_root_changes_unparented_and_link_files() {
         .iter()
         .any(|n| n.display_name == "SharedOrphan.zip"));
 
-    let swm = engine
+    assert!(engine
         .lookup(root, OsStr::new("Shared with me"))
         .await
         .unwrap()
-        .unwrap();
+        .is_none());
+    let swm_id = engine.seed_shared_with_me_root(acct).unwrap();
     let swm_nodes = engine
-        .list_explorer_nodes(acct, swm.id, false)
+        .list_explorer_nodes(acct, swm_id, false)
         .await
         .unwrap();
     assert!(swm_nodes

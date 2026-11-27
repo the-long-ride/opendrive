@@ -24,6 +24,7 @@ mod shutdown;
 mod staging;
 mod stream_cache;
 mod stream_store;
+mod sync_status;
 mod vfs_impl;
 mod worker;
 
@@ -35,6 +36,7 @@ pub use replica_clear::is_reparse_point;
 pub use replica_ops::SyncSummary;
 pub use staging::{StagingDir, StagingError};
 pub use stream_cache::{StreamCache, STREAM_CHUNK_BYTES};
+pub use sync_status::ExplorerSyncStatus;
 
 use async_trait::async_trait;
 use bytes::Bytes;

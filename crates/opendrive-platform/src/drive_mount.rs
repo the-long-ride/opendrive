@@ -1,87 +1,31 @@
-//! Windows virtual drive letter mounting via `subst` and Explorer `DriveIcons`.
+//! Windows virtual drive letter mounting via `subst`, `DriveIcons`, and Shell drive notifications.
 
-use crate::{format_explorer_quota_label, ExplorerQuota, PlatformError, Result};
-use std::path::{Path, PathBuf};
+use crate::drive_letter::{
+    drive_icon_reg_command, drive_label_reg_command, drive_mount_command, drive_unmount_command,
+    normalize_drive_letter, parse_subst_target, paths_match, pick_available_drive_letter,
+};
+use crate::{ExplorerQuota, PlatformError, Result};
+use std::path::Path;
 
-/// Returns `true` on Windows where virtual drive letter mapping is supported.
-pub fn is_virtual_drive_supported() -> bool {
-    cfg!(windows)
-}
-
-/// Validates and normalizes a Windows drive letter input (e.g. `"o:"`, `" O:\\ "` -> `'O'`).
-pub fn normalize_drive_letter(raw: &str) -> Result<char> {
-    let cleaned = raw.trim().trim_end_matches([':', '\\', '/']).trim();
-    let mut chars = cleaned.chars();
-    let letter = match (chars.next(), chars.next()) {
-        (Some(c), None) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
-        _ => {
-            return Err(PlatformError::Other(format!(
-                "invalid drive letter '{raw}': expected a single ASCII letter D-Z"
-            )))
-        }
-    };
-    if matches!(letter, 'A' | 'B' | 'C') {
-        return Err(PlatformError::Other(format!(
-            "drive letter '{letter}:' is reserved; choose D-Z"
-        )));
-    }
-    Ok(letter)
-}
-
-/// Returns the `subst` command and arguments to map `letter:` to `target`.
-pub fn drive_mount_command(letter: char, target: &Path) -> (String, Vec<String>) {
-    (
-        "subst".into(),
-        vec![format!("{letter}:"), target.display().to_string()],
-    )
-}
-
-/// Returns the `subst` command and arguments to unmap `letter:`.
-pub fn drive_unmount_command(letter: char) -> (String, Vec<String>) {
-    ("subst".into(), vec![format!("{letter}:"), "/D".into()])
-}
-
-fn drive_icons_reg_add(drive: char, subkey: &str, value: String) -> (String, Vec<String>) {
-    let key = format!(
-        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\{drive}\{subkey}"
+#[cfg(windows)]
+#[link(name = "shell32")]
+extern "system" {
+    fn SHChangeNotify(
+        event: i32,
+        flags: u32,
+        item1: *const core::ffi::c_void,
+        item2: *const core::ffi::c_void,
     );
-    (
-        "reg".into(),
-        vec![
-            "add".into(),
-            key,
-            "/ve".into(),
-            "/d".into(),
-            value,
-            "/f".into(),
-        ],
-    )
 }
 
-/// Returns the `reg` command and arguments to set `DriveIcons\{drive}\DefaultLabel`.
-pub fn drive_label_reg_command(drive: char, quota: Option<ExplorerQuota>) -> (String, Vec<String>) {
-    drive_icons_reg_add(drive, "DefaultLabel", format_explorer_quota_label(quota))
-}
-
-/// Returns the `reg` command and arguments to set `DriveIcons\{drive}\DefaultIcon`.
-pub fn drive_icon_reg_command(drive: char, icon_path: &Path) -> (String, Vec<String>) {
-    drive_icons_reg_add(drive, "DefaultIcon", format!("{},0", icon_path.display()))
-}
-
-/// Parses `subst` stdout to find the mapped target path for `letter` (case-insensitive).
-pub fn parse_subst_target(stdout: &str, letter: char) -> Option<PathBuf> {
-    let upper = format!("{}:\\: => ", letter.to_ascii_uppercase());
-    let lower = format!("{}:\\: => ", letter.to_ascii_lowercase());
-    for line in stdout.lines() {
-        let trimmed = line.trim();
-        let rest = trimmed
-            .strip_prefix(&upper)
-            .or_else(|| trimmed.strip_prefix(&lower));
-        if let Some(path) = rest.map(str::trim).filter(|p| !p.is_empty()) {
-            return Some(PathBuf::from(path));
-        }
+#[cfg(windows)]
+fn notify_drive_changed(drive: char, added: bool) {
+    let event = if added { 0x0000_0100 } else { 0x0000_0080 };
+    let root = format!("{drive}:\\\0");
+    let wide: Vec<u16> = root.encode_utf16().collect();
+    unsafe {
+        SHChangeNotify(event, 0x0005, wide.as_ptr().cast(), core::ptr::null());
     }
-    None
 }
 
 #[cfg(windows)]
@@ -109,11 +53,42 @@ pub(crate) fn run_hidden(program: &str, args: &[&str]) -> Result<String> {
 }
 
 #[cfg(windows)]
-pub fn mount_virtual_drive(letter: &str, target: &Path) -> Result<char> {
+pub fn mount_virtual_drive_with_quota(
+    letter: &str,
+    target: &Path,
+    quota: Option<ExplorerQuota>,
+) -> Result<char> {
+    let listing = run_hidden("subst", &[]).unwrap_or_default();
+    let chosen = pick_available_drive_letter(letter, &listing, target, |c| {
+        Path::new(&format!("{c}:\\")).exists()
+    })?;
     let ico = crate::data_dir().ok().map(|d| d.join("opendrive.ico"));
-    let drive = mount_with_runner(letter, target, None, ico.as_deref(), run_hidden)?;
+    let drive = mount_with_runner(
+        &chosen.to_string(),
+        target,
+        quota,
+        ico.as_deref(),
+        run_hidden,
+    )?;
+    notify_drive_changed(drive, true);
     crate::notify_shell_mounts_changed();
     Ok(drive)
+}
+
+#[cfg(windows)]
+pub fn mount_virtual_drive(letter: &str, target: &Path) -> Result<char> {
+    mount_virtual_drive_with_quota(letter, target, None)
+}
+
+#[cfg(not(windows))]
+pub fn mount_virtual_drive_with_quota(
+    _letter: &str,
+    _target: &Path,
+    _quota: Option<ExplorerQuota>,
+) -> Result<char> {
+    Err(PlatformError::Other(
+        "virtual drive letters are only supported on Windows".into(),
+    ))
 }
 
 #[cfg(not(windows))]
@@ -131,15 +106,6 @@ fn run_owned_cmd(
 ) -> Result<String> {
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     run(prog, &refs)
-}
-
-#[cfg(windows)]
-fn paths_match(a: &Path, b: &Path) -> bool {
-    a == b
-        || std::fs::canonicalize(a)
-            .ok()
-            .zip(std::fs::canonicalize(b).ok())
-            .is_some_and(|(ca, cb)| ca == cb)
 }
 
 #[cfg(windows)]
@@ -179,7 +145,7 @@ fn unmount_with_runner(
     letter: &str,
     only_target: Option<&Path>,
     mut run: impl FnMut(&str, &[&str]) -> Result<String>,
-) -> Result<()> {
+) -> Result<bool> {
     let drive = normalize_drive_letter(letter)?;
     let listing = run("subst", &[])?;
     let should_unmount = match (parse_subst_target(&listing, drive), only_target) {
@@ -196,12 +162,14 @@ fn unmount_with_runner(
             format!(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\DriveIcons\{drive}");
         let _ = run("reg", &["delete", &key, "/f"]);
     }
-    Ok(())
+    Ok(should_unmount)
 }
 
 #[cfg(windows)]
 pub fn unmount_virtual_drive(letter: &str) -> Result<()> {
-    unmount_with_runner(letter, None, run_hidden)?;
+    let drive = normalize_drive_letter(letter)?;
+    let _ = unmount_with_runner(letter, None, run_hidden)?;
+    notify_drive_changed(drive, false);
     crate::notify_shell_mounts_changed();
     Ok(())
 }
@@ -209,8 +177,11 @@ pub fn unmount_virtual_drive(letter: &str) -> Result<()> {
 /// Unmounts `letter:` only when `subst` maps it to `target`, preserving unrelated drive letters.
 #[cfg(windows)]
 pub fn unmount_virtual_drive_for_target(letter: &str, target: &Path) -> Result<()> {
-    unmount_with_runner(letter, Some(target), run_hidden)?;
-    crate::notify_shell_mounts_changed();
+    let drive = normalize_drive_letter(letter)?;
+    if unmount_with_runner(letter, Some(target), run_hidden)? {
+        notify_drive_changed(drive, false);
+        crate::notify_shell_mounts_changed();
+    }
     Ok(())
 }
 
@@ -241,7 +212,12 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(&ico, b"ico").unwrap();
         let mut calls = Vec::new();
-        let m_ico = mount_with_runner("O", &target, None, Some(&ico), |p, a| {
+        let q_test = ExplorerQuota {
+            used: 100,
+            total: 1000,
+            free: 900,
+        };
+        let m_ico = mount_with_runner("O", &target, Some(q_test), Some(&ico), |p, a| {
             calls.push(format!("{p}:{}", a.join(" ")));
             Ok(String::new())
         });

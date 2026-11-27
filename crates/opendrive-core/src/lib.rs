@@ -3,12 +3,16 @@
 mod accounts_io;
 mod controller;
 mod credentials_io;
+pub mod error_codes;
 mod open_rules;
 mod settings_io;
 
 pub use accounts_io::{accounts_path, load_accounts, save_accounts};
 pub use controller::{AppCommand, AppController, AppEvent};
 pub use credentials_io::{credentials_path, load_credentials, save_credentials};
+pub use error_codes::{
+    infer_diagnostic_code, lookup_diagnostic, DiagnosticCode, LogSeverity, DIAGNOSTIC_CODES,
+};
 pub use open_rules::{
     classify_media_kind, normalize_rule_tokens, resolve_open_app, supports_http_stream_arg,
     validate_open_with_rule, MediaKind, OpenWithRule,
@@ -111,6 +115,8 @@ pub struct Settings {
     pub open_with_rules: Vec<OpenWithRule>,
     #[serde(default = "default_explorer_folder_cache")]
     pub explorer_folder_cache: bool,
+    #[serde(default)]
+    pub ui_font_family: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -135,6 +141,7 @@ impl Default for Settings {
             ignored_release_version: None,
             open_with_rules: Vec::new(),
             explorer_folder_cache: true,
+            ui_font_family: None,
         }
     }
 }

@@ -123,6 +123,10 @@ impl SyncEngine {
         let mut stack = vec![folder_id];
         while let Some(dir_id) = stack.pop() {
             let children = self.list_explorer_nodes(account_id, dir_id, false).await?;
+            let _ =
+                self.store
+                    .lock()
+                    .update_node_state(dir_id as i64, NodeState::Cached, Some(true));
             for child in children {
                 if child.is_folder() {
                     if let Some(root) = local_account_root {

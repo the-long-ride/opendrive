@@ -105,6 +105,12 @@ impl SyncEngine {
         Ok(id as NodeId)
     }
 
+    pub fn seed_shared_with_me_root(&self, account_id: Uuid) -> Result<NodeId> {
+        let store = self.store.lock();
+        self.ensure_shared_with_me_node(&store, account_id)
+            .map(|id| id as NodeId)
+    }
+
     pub fn enqueue_upload(
         &self,
         node_id: i64,

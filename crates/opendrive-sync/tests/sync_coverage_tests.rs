@@ -201,15 +201,15 @@ async fn hydrate_shared_with_me_shortcuts_and_poller_conflict_paths() {
     eng.set_drive_client(acct, client);
     let root = eng.seed_root_account(acct, "Root").unwrap();
     eng.hydrate_folder(acct, root).await.unwrap();
-    assert!(eng
+    assert!(!eng
         .placeholder_folder_rel_paths(root)
         .iter()
         .any(|p| p == std::path::Path::new("Shared with me")));
 
-    let swm_id = eng.resolve_remote_path(root, "Shared with me").unwrap();
+    let swm_id = eng.seed_shared_with_me_root(acct).unwrap();
     eng.hydrate_folder(acct, swm_id).await.unwrap();
     assert!(eng
-        .resolve_remote_path(root, "Shared with me/SharedDir/SharedDoc.txt")
+        .resolve_remote_path(swm_id, "SharedDir/SharedDoc.txt")
         .is_some());
     assert!(eng
         .lookup(swm_id, OsStr::new("LooseShared.txt"))

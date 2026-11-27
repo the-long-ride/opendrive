@@ -1,14 +1,19 @@
 //! Autostart, paths, notifications, single-instance, tray.
 
+mod drive_letter;
 mod drive_mount;
 mod explorer_quota;
 mod mount_cleanup;
 mod tray;
 
-pub use drive_mount::{
+pub use drive_letter::{
     drive_icon_reg_command, drive_label_reg_command, drive_mount_command, drive_unmount_command,
-    is_virtual_drive_supported, mount_virtual_drive, normalize_drive_letter, parse_subst_target,
-    unmount_virtual_drive, unmount_virtual_drive_for_target,
+    is_virtual_drive_supported, normalize_drive_letter, parse_subst_target,
+    pick_available_drive_letter,
+};
+pub use drive_mount::{
+    mount_virtual_drive, mount_virtual_drive_with_quota, unmount_virtual_drive,
+    unmount_virtual_drive_for_target,
 };
 pub use explorer_quota::{
     build_launch_invocation, build_this_pc_reg_commands, compute_explorer_quota,
