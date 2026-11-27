@@ -14,7 +14,9 @@ export function normalizePath(filePath) {
 }
 
 function isDocsOrMeta(file) {
-  if (file.startsWith('docs/')) return true;
+  if (file.startsWith('docs/') || file.startsWith('assets/') || file.startsWith('.agents/')) {
+    return true;
+  }
   if (DOCS_ONLY_FILES.has(file)) return true;
   return /\.(?:md|mdx|txt|rst)$/i.test(file);
 }

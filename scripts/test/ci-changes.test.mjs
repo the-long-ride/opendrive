@@ -17,7 +17,16 @@ test('normalizePath converts Windows backslashes and strips leading ./', () => {
 test('classifyChanges returns false/false for empty or docs-only changes', () => {
   assert.deepEqual(classifyChanges([]), { node: false, rust: false });
   assert.deepEqual(
-    classifyChanges(['README.md', 'docs/specs/01.md', '.prettierrc.json', '.prettierignore']),
+    classifyChanges([
+      'README.md',
+      'AGENTS.md',
+      'llm.txt',
+      'docs/specs/01.md',
+      'assets/demo-pictures/OpenDrive-Explorer.png',
+      '.agents/notes.md',
+      '.prettierrc.json',
+      '.prettierignore',
+    ]),
     { node: false, rust: false },
   );
 });

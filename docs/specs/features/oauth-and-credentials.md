@@ -13,7 +13,7 @@ last_verified_at: "2026-11-26T17:06:00Z"
 last_verified_code_commit: "91d18b7a858b4edc92690c91562150ceb6622d5a"
 last_source_change_commit: "600d2df0ad0c4d97420d87fa94048e4eac1b8129"
 last_source_change_at: "2026-11-26T14:29:37+07:00"
-source_fingerprint: "sha256:a0f1d5702c417b4f5c042fb6f0ac26ffe20c0aa7d36b298a2bcd099914f26cc5"
+source_fingerprint: "sha256:14d27b50ecec0caecc7905cfd7cc3a6d07393766da33071e772a2e5650c534c1"
 ---
 
 # OAuth 2.0 PKCE loopback authentication, Service Account JWT, and SecretStore

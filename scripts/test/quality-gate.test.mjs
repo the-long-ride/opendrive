@@ -24,6 +24,8 @@ test('package.json defines required quality-gate scripts', () => {
     'lint:loc',
     'lint:dead',
     'lint:rust',
+    'validate:specs',
+    'hooks:install',
     'test:scripts',
     'test:coverage:node',
     'test:coverage:rust',
@@ -53,6 +55,15 @@ test('quality-gate workflow enforces Node 24, 95% coverage, Rust checks, and gat
   assert.match(workflow, /if:\s*always\(\)/);
   assert.match(workflow, /cargo fmt --all -- --check/);
   assert.match(workflow, /cargo clippy --workspace --all-targets --locked -- -D warnings/);
+  assert.match(workflow, /npm run validate:specs/);
+  assert.match(workflow, /paths-ignore:/);
+  assert.match(workflow, /assets\/\*\*/);
+
+  const ciWorkflow = read('.github/workflows/ci.yml');
+  assert.match(ciWorkflow, /paths-ignore:/);
+  assert.match(ciWorkflow, /docs\/\*\*/);
+  assert.match(ciWorkflow, /assets\/\*\*/);
+  assert.match(ciWorkflow, /\*\*\/\*\.md/);
 
   const nodeCov = read('scripts/test-coverage-node.mjs');
   for (const metric of ['--lines', '--statements', '--functions', '--branches']) {

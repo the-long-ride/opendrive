@@ -3,7 +3,25 @@ name: Quality Gate
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'assets/**'
+      - '**/*.md'
+      - '**/*.mdx'
+      - '**/*.txt'
+      - '**/*.rst'
+      - 'LICENSE'
+      - '.agents/**'
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'assets/**'
+      - '**/*.md'
+      - '**/*.mdx'
+      - '**/*.txt'
+      - '**/*.rst'
+      - 'LICENSE'
+      - '.agents/**'
   workflow_dispatch:
 
 concurrency:
@@ -45,6 +63,7 @@ jobs:
       - run: npm run lint:source
       - run: npm run lint:loc
       - run: npm run lint:dead
+      - run: npm run validate:specs
       - run: npm run test:scripts
 
   node-coverage:
