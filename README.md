@@ -17,6 +17,10 @@
   <a href="https://github.com/the-long-ride/opendrive/releases"><img src="https://img.shields.io/badge/Platforms-Win%20%C2%B7%20macOS%20%C2%B7%20Linux-ffffff?style=flat-square&labelColor=000000" alt="Platforms" /></a>
 </p>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/the-long-ride/opendrive/main/assets/demo-pictures/OpenDrive-Explorer.png" alt="OpenDrive Cloud Explorer demo" width="100%" />
+</p>
+
 ## Setup & Connect Google Drive Account
 
 - Follow the step-by-step [Connect Account Guide](docs/connect-account-guide.md) (or click **Setup Guide** inside the app's **Connect** drawer) to create your own free Google Cloud OAuth 2.0 Desktop credentials or Service Account JSON key.
@@ -35,12 +39,13 @@ OpenDrive requires **no custom kernel drivers** (no WinFsp, Dokany, or macFUSE):
 
 Portable archives and native installers (`NSIS` `.exe`, `.dmg`, `.AppImage`, `.deb`) are published via GitHub Releases.
 
-## Built-in Drive Explorer, Streaming & Open-With Rules
+## Features
 
-- **Full-Viewport Drive Explorer:** Click **Explore** on any account card to browse folders with clickable breadcrumbs, search filtering, List/Grid toggles, multi-selection (`Ctrl/Cmd+Click`, `Shift+Click`, `Ctrl/Cmd+A`), colored media-type icons, `Sync State` badges, drag-and-drop uploads, batch Copy/Move/Delete & Sync controls, and per-account session persistence across account switches.
-- **Explicit Sync Controls (Safety Invariant #3):** Run **Sync Down** (atomic download + cache pinning + Windows placeholder reconciliation), **Sync Up** (files or recursive folders), or **Sync Up & Clear Local** (uploads and verifies remote `drive_id` before removing local replicas or dehydrating CFAPI placeholders).
-- **Smooth Localhost `206` Video Streaming:** Streams remote videos over a token-authenticated `127.0.0.1` HTTP/1.1 `206 Partial Content` server (`MediaStreamServer`) backed by a `2 MiB` chunked `StreamCache` with concurrent head + tail `moov` pre-warming, single-flight coalescing, and read-ahead caching.
-- **Custom Open-With Format Rules:** Configure per-extension (`mp4,mkv`), media-group (`@video`, `@image`, `@pdf`, `@audio`, `@code`), or wildcard (`*`) launcher overrides in **Settings**; streaming players (`vlc`, `mpv`, `iina`, `ffplay`, etc.) receive the localhost stream URL directly while other files open via OS defaults.
+- **Full-Viewport Cloud Explorer:** Switch **My Drive** and **Shared with me** scopes with List/Grid views, search, folder caching, multi-select, drag-and-drop uploads, hierarchical sync badges (`Cloud`, `Indexed`, `PartialLocal`, `FullLocal`), and batch Copy/Move/Rename/Delete.
+- **Explicit Sync & Token Refresh:** **Sync Down**, **Sync Up**, and verified **Sync Up & Clear Local**, backed by automatic 50-minute / HTTP `401` single-flight OAuth & Service Account token refresh.
+- **Localhost `206` Streaming & Open-With Rules:** Token-gated `127.0.0.1` `206 Partial Content` video streaming (`2 MiB` chunked `StreamCache` + head/tail pre-warming) with custom per-extension, `@group`, or `*` app launcher overrides.
+- **Themes, UI Fonts & Security:** Dark/Light Bento themes, searchable **UI Font** selector (system, Google Fonts, public `https://` URLs, local `.ttf`/`.otf`/`.ttc`), visual Setup Guide, OS keyring (`SecretStore`), and AES-GCM `.odcred` backups.
+- **In-App Terminal & AI Support:** Credential-masked **Terminal Log** + structured `OD-*` **App Logs** with search/severity filters and copyable version-pinned **AI Support** prompts (`llm.txt`).
 
 ## CLI Commands
 
@@ -70,6 +75,16 @@ npm run desktop                         # Build & launch desktop UI (or VS Code 
 cargo run -p opendrive-app --locked     # Run directly with Cargo
 npm run test:gate                       # Format, lint, scripts, and >=95% coverage
 ```
+
+## Roadmap
+
+Upcoming improvements planned on top of the `v0.3.0` core (also tracked in [docs/ROADMAP.md](docs/ROADMAP.md)):
+
+- **Explorer Collaboration & History:** File version history (Drive v3 revisions), owner card details (avatar, name, email with one-click copy), multi-email folder/file sharing permissions, and one-click Drive link copy.
+- **Details & Preview Panel (Toggleable, Default ON):** Optional right-side preview/inspector panel (`Settings` toggle) displaying item previews, metadata, and recent file/folder activity.
+- **New `Favorites` & `Trash` Scopes:** Add `Favorites` (user-created shortcuts and custom virtual folder hierarchies for quick navigation) and `Trash` (browse, restore, or permanently delete trashed Drive files/folders) alongside `My Drive` and `Shared with me`.
+- **Built-in MCP Server (AI Agent Integration):** Expose an `opendrive mcp` Model Context Protocol server (`stdio` / localhost) wrapping Explorer listing, sync controls, file operations, and safe diagnostics so AI agents can inspect and operate connected drives with explicit permission/read-only guards.
+- **Multi-Cloud Provider Support (Post-Drive Stability):** Extend the storage/sync abstraction beyond Google Drive to **OneDrive**, **Mega**, **Dropbox**, **Cloudinary**, and other providers once Google Drive file/folder workflows stabilize.
 
 ## Docs
 
