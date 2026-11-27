@@ -13,7 +13,7 @@ last_verified_at: "2026-11-27T11:15:00Z"
 last_verified_code_commit: "563d57aa9649b5368a31ef5aa96171d0453d30dc"
 last_source_change_commit: "375147183a37010b7d5c8bd91768ec7c3dd44fab"
 last_source_change_at: "2026-11-26T19:20:18+07:00"
-source_fingerprint: "sha256:dfd6ab9dc5452ea9bb8c9258841b6da756660db622d7453d5f03b603546b85ef"
+source_fingerprint: "sha256:938788c64f775abf61c988cef4caf684de8b1db8912f1821621977198666b1da"
 ---
 # CLI Commands, Synchronous Control Bridge, and Auth Runners
 
