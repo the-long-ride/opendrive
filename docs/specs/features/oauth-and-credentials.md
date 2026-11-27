@@ -9,11 +9,11 @@ tags: ["auth", "oauth2", "pkce", "loopback", "keyring", "secret-store", "service
 source_paths: ["crates/opendrive-auth/src/keyring.rs", "crates/opendrive-auth/src/lib.rs", "crates/opendrive-auth/src/loopback.rs", "crates/opendrive-auth/src/pkce.rs", "crates/opendrive-auth/src/secret_store.rs", "crates/opendrive-auth/src/service_account.rs", "crates/opendrive-auth/src/vault.rs", "crates/opendrive-auth/tests/auth_coverage_tests.rs", "crates/opendrive-auth/tests/auth_tests.rs", "crates/opendrive-auth/tests/vault_tests.rs"]
 related_specs: ["architecture.workspace-overview", "feature.drive-v3-client", "interface.cli-http-bridge", "feature.control-center-ui"]
 last_doc_update_at: "2026-11-26T07:07:19Z"
-last_verified_at: "2026-11-26T07:07:19Z"
-last_verified_code_commit: "aa2135c5d17ce0016d4fa42bb2c2705bbba7c709"
+last_verified_at: "2026-11-26T17:06:00Z"
+last_verified_code_commit: "91d18b7a858b4edc92690c91562150ceb6622d5a"
 last_source_change_commit: "600d2df0ad0c4d97420d87fa94048e4eac1b8129"
 last_source_change_at: "2026-11-26T14:29:37+07:00"
-source_fingerprint: "sha256:bf44da47a29a192cfab73eff0901f8ab317a3146da6de992b5a5bc90ca69696c"
+source_fingerprint: "sha256:a0f1d5702c417b4f5c042fb6f0ac26ffe20c0aa7d36b298a2bcd099914f26cc5"
 ---
 
 # OAuth 2.0 PKCE loopback authentication, Service Account JWT, and SecretStore

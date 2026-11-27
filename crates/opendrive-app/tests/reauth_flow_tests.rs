@@ -262,7 +262,11 @@ async fn client_secret_persists_on_oauth_start_and_keyring_errors_surface() {
         secrets.load_client_secret(cred_id).unwrap().as_deref(),
         Some("GOCSPX-saved-early")
     );
-    let reopened = ControlCenterApp::new(bridge);
+    let mut reopened = ControlCenterApp::new(bridge);
+    assert!(reopened.draft.client_id.is_empty());
+    assert!(reopened.draft.client_secret.is_empty());
+    reopened.apply_action(UiAction::OpenReauthCredentials(acct_id.to_string()));
+    assert!(reopened.drawer_open);
     assert_eq!(reopened.draft.client_id, "cid-keep");
     assert_eq!(reopened.draft.client_secret, "GOCSPX-saved-early");
 

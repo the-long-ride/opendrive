@@ -194,6 +194,7 @@ fn explorer_list_and_grid_columns_align_and_render_unicode() {
         size,
         modified_ms,
         state: NodeState::Cached,
+        sync_status: opendrive_sync::ExplorerSyncStatus::FullLocal,
         pinned: false,
         drive_id: format!("d-{id}"),
     };

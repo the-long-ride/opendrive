@@ -9,8 +9,7 @@ use eframe::egui::{
     self, Align, CornerRadius, CursorIcon, Layout, Pos2, Rect, RichText, Sense, Stroke, StrokeKind,
     Vec2,
 };
-use opendrive_store::NodeState;
-use opendrive_sync::SHARED_WITH_ME_DRIVE_ID;
+use opendrive_sync::{ExplorerSyncStatus, SHARED_WITH_ME_DRIVE_ID};
 use std::cmp::Ordering;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -22,13 +21,15 @@ pub enum ExplorerSortColumn {
     Size,
 }
 
-fn state_rank(state: &NodeState) -> u8 {
-    match state {
-        NodeState::Conflict => 0,
-        NodeState::Dirty => 1,
-        NodeState::Hydrating => 2,
-        NodeState::Cached => 3,
-        NodeState::Placeholder => 4,
+fn state_rank(status: ExplorerSyncStatus) -> u8 {
+    match status {
+        ExplorerSyncStatus::Conflict => 0,
+        ExplorerSyncStatus::PendingUpload => 1,
+        ExplorerSyncStatus::Syncing => 2,
+        ExplorerSyncStatus::FullLocal => 3,
+        ExplorerSyncStatus::PartialLocal => 4,
+        ExplorerSyncStatus::Indexed => 5,
+        ExplorerSyncStatus::Cloud => 6,
     }
 }
 
@@ -49,7 +50,9 @@ pub(super) fn compare_entries(
                     .name
                     .to_ascii_lowercase()
                     .cmp(&b.name.to_ascii_lowercase()),
-                ExplorerSortColumn::SyncState => state_rank(&a.state).cmp(&state_rank(&b.state)),
+                ExplorerSortColumn::SyncState => {
+                    state_rank(a.sync_status).cmp(&state_rank(b.sync_status))
+                }
                 ExplorerSortColumn::Modified => a.modified_ms.cmp(&b.modified_ms),
                 ExplorerSortColumn::Size => a.size.cmp(&b.size),
             };

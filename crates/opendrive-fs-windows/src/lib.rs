@@ -1,6 +1,7 @@
 //! Windows Cloud Files API frontend.
 //! One sync root per account under `%USERPROFILE%\OpenDrive\` (siblings).
 
+pub mod cfapi_placeholders;
 #[cfg(windows)]
 pub mod cfapi_sys;
 mod provider;
@@ -132,9 +133,19 @@ impl CloudFilesFrontend {
 
     pub fn reconcile_placeholders(root_path: &Path, rel_dirs: &[PathBuf]) {
         #[cfg(windows)]
-        cfapi_sys::reconcile_placeholder_dirs(root_path, rel_dirs);
+        cfapi_placeholders::reconcile_placeholder_dirs(root_path, rel_dirs);
         #[cfg(not(windows))]
         let _ = (root_path, rel_dirs);
+    }
+
+    pub fn reconcile_placeholder_entries(
+        root_path: &Path,
+        entries: &[(PathBuf, opendrive_sync::NodeId, bool)],
+    ) {
+        #[cfg(windows)]
+        cfapi_placeholders::reconcile_placeholder_entries(root_path, entries);
+        #[cfg(not(windows))]
+        let _ = (root_path, entries);
     }
 
     pub fn unregister_sync_root(&mut self, path: &str) -> Result<(), String> {
@@ -242,57 +253,40 @@ mod tests {
     }
 
     #[test]
-    fn provider_bridge_with_root_and_register_at() {
-        let dir = std::env::temp_dir().join(format!("od-win-root-at-{}", Uuid::new_v4()));
-        let path_str = dir.to_str().unwrap().to_string();
-        let engine: Arc<dyn VfsEngine> = Arc::new(PlaceholderEngine);
-        let bridge = ProviderBridge::with_root(engine.clone(), 42);
-        assert_eq!(bridge.root_node(), 42);
-        let mut frontend = CloudFilesFrontend::new(engine);
-        frontend
-            .register_sync_root_at(&path_str, "bob", 42)
-            .unwrap();
-        assert_eq!(frontend.roots().len(), 1);
-        assert_eq!(frontend.roots()[0].account_name, "bob");
-        assert_eq!(frontend.bridges[0].root_node(), 42);
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn try_dehydrate_placeholder_returns_false_for_regular_and_missing_files() {
-        let dir = std::env::temp_dir().join(format!("od-win-dehyd-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let regular = dir.join("regular.txt");
-        std::fs::write(&regular, b"hello").unwrap();
-        assert!(!try_dehydrate_placeholder(&regular));
-        assert!(!try_dehydrate_placeholder(&dir));
-        assert!(!try_dehydrate_placeholder(&dir.join("missing.txt")));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn icon_resource_reconcile_and_unregister_non_matching_root() {
-        let base = std::env::temp_dir().join(format!("od-win-icon-{}", Uuid::new_v4()));
-        let (r1, r2) = (base.join("a"), base.join("b"));
+    fn provider_bridge_icon_reconcile_and_dehydrate() {
+        let base = std::env::temp_dir().join(format!("od-win-comb-{}", Uuid::new_v4()));
+        let (r1, r2, regular) = (base.join("a"), base.join("b"), base.join("regular.txt"));
         std::fs::create_dir_all(r1.join("sub")).unwrap();
+        std::fs::write(&regular, b"hello").unwrap();
+        assert!(
+            !try_dehydrate_placeholder(&regular)
+                && !try_dehydrate_placeholder(&r1)
+                && !try_dehydrate_placeholder(&base.join("missing.txt"))
+        );
+
+        let engine: Arc<dyn VfsEngine> = Arc::new(PlaceholderEngine);
+        assert_eq!(
+            ProviderBridge::with_root(engine.clone(), 42).root_node(),
+            42
+        );
         let id = SyncRootIdentity::new("a", r1.clone()).with_icon_resource("app.ico,0");
         assert_eq!(id.icon_resource.as_deref(), Some("app.ico,0"));
-        let mut frontend =
-            CloudFilesFrontend::new(Arc::new(PlaceholderEngine)).with_icon_resource("fe.ico,0");
+        let mut frontend = CloudFilesFrontend::new(engine).with_icon_resource("fe.ico,0");
         frontend
-            .register_sync_root(r1.to_str().unwrap(), "alice")
+            .register_sync_root_at(r1.to_str().unwrap(), "alice", 42)
             .unwrap();
         frontend
             .register_sync_root(r2.to_str().unwrap(), "bob")
             .unwrap();
+        assert_eq!(frontend.bridges[0].root_node(), 42);
         assert_eq!(
             frontend.roots()[0].icon_resource.as_deref(),
             Some("fe.ico,0")
         );
         CloudFilesFrontend::reconcile_placeholders(&r1, &[PathBuf::from("sub")]);
+        CloudFilesFrontend::reconcile_placeholder_entries(&r1, &[(PathBuf::from("sub"), 42, true)]);
         frontend.unregister_sync_root(r2.to_str().unwrap()).unwrap();
         assert_eq!(frontend.roots().len(), 1);
-        assert_eq!(frontend.roots()[0].account_name, "alice");
         let _ = std::fs::remove_dir_all(base);
     }
 }

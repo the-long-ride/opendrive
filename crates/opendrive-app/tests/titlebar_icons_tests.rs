@@ -140,12 +140,13 @@ fn titlebar_wraps_before_overlap_at_470px_and_toggles_settings_in_compact_mode()
     shapes
         .iter()
         .for_each(|cs| collect_titlebar_pills(&cs.shape, 96.0, &mut pills));
-    let wrapped_settings_pos = pills
+    let mut wrapped: Vec<Rect> = pills
         .into_iter()
         .filter(|rect| rect.top() > title_rect.y + 12.0)
-        .max_by(|a, b| a.left().total_cmp(&b.left()))
-        .expect("wrapped titlebar settings button")
-        .center();
+        .collect();
+    wrapped.sort_by(|a, b| a.left().total_cmp(&b.left()));
+    assert!(wrapped.len() >= 4);
+    let wrapped_settings_pos = wrapped[wrapped.len() - 2].center();
 
     let _ = run_size(
         &ctx,

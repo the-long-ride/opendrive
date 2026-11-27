@@ -9,11 +9,11 @@ tags: ["architecture", "sqlite", "store", "cache", "upload-queue", "eviction"]
 source_paths: ["crates/opendrive-store/src/cache.rs", "crates/opendrive-store/src/lib.rs", "crates/opendrive-store/src/queue_store.rs", "crates/opendrive-store/src/types.rs", "crates/opendrive-store/tests/store_coverage_tests.rs", "crates/opendrive-store/tests/store_tests.rs"]
 related_specs: ["architecture.workspace-overview", "workflow.sync-hydration-conflicts"]
 last_doc_update_at: "2026-11-26T07:05:00Z"
-last_verified_at: "2026-11-26T07:07:19Z"
-last_verified_code_commit: "aa2135c5d17ce0016d4fa42bb2c2705bbba7c709"
-last_source_change_commit: "600d2df0ad0c4d97420d87fa94048e4eac1b8129"
-last_source_change_at: "2026-11-26T14:29:37+07:00"
-source_fingerprint: "sha256:fb68cf2adcd65cea24922ea79443e886eef5f3b8fd8cbd67abaf6b964fa218cd"
+last_verified_at: "2026-11-26T17:06:00Z"
+last_verified_code_commit: "91d18b7a858b4edc92690c91562150ceb6622d5a"
+last_source_change_commit: "375147183a37010b7d5c8bd91768ec7c3dd44fab"
+last_source_change_at: "2026-11-26T19:20:18+07:00"
+source_fingerprint: "sha256:3309c43b9bfd49edf5abb497a5dcdfd01ce79ecb99d93b0f2d840af4fa06616a"
 ---
 
 # SQLite metadata store, cache index, and upload queue

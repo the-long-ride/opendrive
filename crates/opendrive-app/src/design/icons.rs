@@ -45,6 +45,8 @@ pub enum IconKind {
     CloudUpload,
     CloudClear,
     DownloadCheck,
+    DownloadPartial,
+    FolderIndexed,
     MoveRight,
     Image,
     Video,
@@ -54,6 +56,8 @@ pub enum IconKind {
     DocSheet,
     Monitor,
     Link,
+    Terminal,
+    HelpBook,
 }
 
 pub(crate) fn map_pt(rect: Rect, x: f32, y: f32) -> Pos2 {
@@ -217,50 +221,10 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: IconKind, color: Co
                 painter.circle_filled(map_pt(rect, pt.0, pt.1), radius, color);
             }
         }
-        IconKind::Settings => {
-            let gear_stroke = Stroke::new(1.35, color);
-            painter.circle_stroke(map_pt(rect, 10.0, 10.0), rect.width() * 0.135, gear_stroke);
-            let mut teeth = Vec::with_capacity(30);
-            for step in 0..6 {
-                let tooth_angle =
-                    -std::f32::consts::FRAC_PI_2 + (step as f32) * std::f32::consts::FRAC_PI_3;
-                for (angle_offset, radius) in [
-                    (-0.27, 5.5),
-                    (-0.17, 8.1),
-                    (0.17, 8.1),
-                    (0.27, 5.5),
-                    (std::f32::consts::FRAC_PI_6, 5.35),
-                ] {
-                    let (sin, cos) = (tooth_angle + angle_offset).sin_cos();
-                    teeth.push(map_pt(rect, 10.0 + cos * radius, 10.0 + sin * radius));
-                }
+        other => {
+            if !crate::design::icons_extra::paint_extra_icon(painter, rect, other, color, s) {
+                crate::design::icons_media::paint_media_icon(painter, rect, other, s);
             }
-            painter.add(egui::Shape::closed_line(teeth, gear_stroke));
         }
-        IconKind::Monitor => {
-            stroke_poly(
-                painter,
-                rect,
-                &[(3.0, 4.0), (17.0, 4.0), (17.0, 13.5), (3.0, 13.5)],
-                true,
-                s,
-            );
-            seg(painter, rect, (10.0, 13.5), (10.0, 16.5), s);
-            seg(painter, rect, (6.5, 16.5), (13.5, 16.5), s);
-        }
-        IconKind::Link => {
-            let left_link = [(8.5, 7.), (5.5, 7.), (3.5, 10.), (5.5, 13.), (8.5, 13.)];
-            let right_link = [
-                (11.5, 7.),
-                (14.5, 7.),
-                (16.5, 10.),
-                (14.5, 13.),
-                (11.5, 13.),
-            ];
-            stroke_poly(painter, rect, &left_link, false, s);
-            stroke_poly(painter, rect, &right_link, false, s);
-            seg(painter, rect, (7.0, 10.0), (13.0, 10.0), s);
-        }
-        other => crate::design::icons_media::paint_media_icon(painter, rect, other, s),
     }
 }

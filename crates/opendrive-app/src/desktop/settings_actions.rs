@@ -16,10 +16,17 @@ impl ControlCenterApp {
         self.drawer_open = force.unwrap_or(!self.drawer_open);
         self.form_error = None;
         self.reauth_account_id = None;
+        if self.drawer_open {
+            self.cancel_active_auth();
+            self.draft = crate::design::formatters::NewAccountDraft::default();
+        }
     }
 
     pub fn toggle_settings(&mut self, force: Option<bool>) {
         self.settings_open = force.unwrap_or(!self.settings_open);
+        if self.settings_open {
+            self.ensure_font_catalog_loaded();
+        }
     }
 
     pub fn toggle_guide(&mut self, force: Option<bool>) {
@@ -29,6 +36,7 @@ impl ControlCenterApp {
     pub fn open_vault_backup(&mut self) {
         self.drawer_open = false;
         self.settings_open = true;
+        self.ensure_font_catalog_loaded();
     }
 
     pub fn open_cloud_console(&mut self) {
@@ -51,13 +59,24 @@ impl ControlCenterApp {
             Some(std::time::Instant::now() + crate::desktop::panels::TOAST_TIMEOUT);
     }
 
-    pub(super) fn set_err(&mut self, message: impl Into<String>) {
+    pub(super) fn set_err_without_log(&mut self, message: impl Into<String>) {
         self.notice = Some(UiNotice {
             tone: NoticeTone::Error,
             message: message.into(),
         });
         self.notice_expires_at =
             Some(std::time::Instant::now() + crate::desktop::panels::TOAST_TIMEOUT);
+    }
+
+    pub(super) fn set_err(&mut self, message: impl Into<String>) {
+        let msg = message.into();
+        crate::runtime::app_logs::app_log_hub().record_event(
+            opendrive_core::LogSeverity::Error,
+            "opendrive::app",
+            None,
+            &msg,
+        );
+        self.set_err_without_log(msg);
     }
 
     pub fn dismiss_notice(&mut self) {

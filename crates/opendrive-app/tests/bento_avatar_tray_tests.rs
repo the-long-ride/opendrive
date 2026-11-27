@@ -172,6 +172,10 @@ async fn avatar_download_cache_decoding_and_tray_close_lifecycle() {
     let ico = ensure_logo_ico(&tmp).unwrap();
     let ico_bytes = std::fs::read(&ico).unwrap();
     assert_eq!(&ico_bytes[..6], &[0, 0, 1, 0, 1, 0]);
+    let png = opendrive_app::design::logo::encode_logo_png(64).unwrap();
+    assert_eq!(&png[..4], b"\x89PNG");
+    let multi = opendrive_app::design::logo::encode_multi_size_ico(&[16, 256]).unwrap();
+    assert_eq!(&multi[..6], &[0, 0, 1, 0, 2, 0]);
     handle.abort();
     let _ = std::fs::remove_dir_all(&tmp);
 }

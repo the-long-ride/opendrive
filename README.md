@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/opendrive-logo.svg" alt="OpenDrive logo" width="96" height="96" />
+  <img src="https://raw.githubusercontent.com/the-long-ride/opendrive/main/docs/assets/opendrive-logo.svg" alt="OpenDrive logo" width="96" height="96" />
 </p>
 
 <h1 align="center">OpenDrive</h1>

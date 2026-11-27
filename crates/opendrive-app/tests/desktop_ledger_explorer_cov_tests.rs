@@ -284,7 +284,7 @@ fn panels_zoom_ledger_row_drawer_explorer_and_modals_widget_clicks() {
         })
         .for_each(|p| hit(&ctx, &mut app, sz, p.center()));
     assert!(clk(&ctx, &mut app, sz, "Remove", 240.0) && clk(&ctx, &mut app, sz, "Connect", 200.0));
-    assert!(clk(&ctx, &mut app, sz, "Close", 200.0));
+    assert!(clk(&ctx, &mut app, sz, "Cancel", 0.0) && !app.drawer_open);
     tok_srv.abort();
     drive_h.abort();
     let _ = std::fs::remove_dir_all(&tmp);

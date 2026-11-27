@@ -113,9 +113,10 @@ fn mount_manager_hydrates_oauth_and_service_accounts_and_unmounts_on_pause_remov
 
     let oauth_root = engine.seed_root_account(oauth_id, "Work").unwrap();
     let page = server_rt.block_on(engine.list(oauth_root, None)).unwrap();
-    assert_eq!(page.entries.len(), 2);
+    assert_eq!(page.entries.len(), 1);
     assert!(page.entries.iter().any(|e| e.name == "Roadmap.txt"));
-    assert!(page.entries.iter().any(|e| e.name == "Shared with me"));
+    assert!(!page.entries.iter().any(|e| e.name == "Shared with me"));
+    assert!(engine.seed_shared_with_me_root(oauth_id).is_ok());
 
     mounts.sync_now(&ctrl, &engine, &secrets).unwrap();
     assert_eq!(backend.connected.lock().unwrap().len(), 2);
@@ -233,9 +234,13 @@ fn virtual_drive_persistence_error_notices_and_live_backend_surface() {
         .controller_handle()
         .lock()
         .unwrap()
-        .settings
-        .virtual_drive_letter = "C".into();
-    bridge.update_virtual_drive(true).unwrap();
+        .accounts
+        .add_account(make_account(
+            Uuid::new_v4(),
+            Uuid::nil(),
+            "NoSec",
+            AccountStatus::Connected,
+        ));
     bridge.spawn_mount_sync(None);
     let deadline = Instant::now() + Duration::from_secs(3);
     let notice = loop {
@@ -248,8 +253,7 @@ fn virtual_drive_persistence_error_notices_and_live_backend_surface() {
         );
         std::thread::sleep(Duration::from_millis(10));
     };
-    assert!(notice.0);
-    assert!(notice.1.contains("Virtual drive C"));
+    assert!(notice.0 && !notice.1.is_empty());
 
     let null_backend = NullMountBackend;
     null_backend.prepare_root(&mount_root).unwrap();

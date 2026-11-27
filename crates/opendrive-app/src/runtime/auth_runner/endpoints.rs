@@ -27,6 +27,8 @@ pub struct AuthEndpoints {
     pub app_exe_picker: VaultFilePicker,
     pub item_launcher: ItemLauncher,
     pub release_api_url: String,
+    pub font_open_picker: VaultFilePicker,
+    pub google_fonts_css_base: String,
 }
 
 impl Default for AuthEndpoints {
@@ -63,6 +65,12 @@ impl Default for AuthEndpoints {
                 opendrive_platform::launch_with_app(cmd, target).map_err(|e| e.to_string())
             }),
             release_api_url: GITHUB_LATEST_RELEASE_URL.to_string(),
+            font_open_picker: Arc::new(|| {
+                rfd::FileDialog::new()
+                    .add_filter("Font Files", &["ttf", "otf", "ttc"])
+                    .pick_file()
+            }),
+            google_fonts_css_base: crate::runtime::font_import::GOOGLE_FONTS_CSS_BASE.to_string(),
         }
     }
 }

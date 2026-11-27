@@ -4,7 +4,7 @@ use crate::conflict::{hostname_fallback, materialize_conflict_sibling, revision_
 use crate::engine::SyncEngine;
 use crate::hydrate::resolve_drive_target;
 use crate::path_time::parse_rfc3339_ms;
-use crate::{EngineEvent, NodeId, Result, SyncError};
+use crate::{EngineEvent, Result, SyncError};
 use opendrive_store::NodeState;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -15,32 +15,23 @@ use uuid::Uuid;
 impl SyncEngine {
     /// Poll changes for one account; apply to store; emit events.
     pub async fn poll_changes(&self, account_id: Uuid) -> Result<usize> {
-        let token = {
-            let store = self.store.lock();
-            store
-                .get_change_token(account_id)
-                .map_err(|e| SyncError::Other(e.to_string()))?
-        };
-
+        let token = self
+            .store
+            .lock()
+            .get_change_token(account_id)
+            .map_err(|e| SyncError::Other(e.to_string()))?;
         let client = self.drive_client_for(account_id)?;
         let page_token = match token {
             Some(t) => t,
-            None => match client.get_start_page_token().await {
-                Ok(t) => t,
-                Err(e) => {
-                    self.errors.fetch_add(1, Ordering::Relaxed);
-                    return Err(SyncError::Other(e.to_string()));
-                }
-            },
-        };
-
-        let changes = match client.changes(&page_token).await {
-            Ok(c) => c,
-            Err(e) => {
+            None => client.get_start_page_token().await.map_err(|e| {
                 self.errors.fetch_add(1, Ordering::Relaxed);
-                return Err(SyncError::Other(e.to_string()));
-            }
+                SyncError::Other(e.to_string())
+            })?,
         };
+        let changes = client.changes(&page_token).await.map_err(|e| {
+            self.errors.fetch_add(1, Ordering::Relaxed);
+            SyncError::Other(e.to_string())
+        })?;
 
         let real_root_id = self.ensure_real_root_id(account_id, &client).await;
         let mut applied = 0;
@@ -61,23 +52,22 @@ impl SyncEngine {
                         .flatten();
                     if let Some(ref cur) = existing {
                         if cur.state == NodeState::Dirty {
-                            if revision_conflict(
+                            if !revision_conflict(
                                 cur.head_revision.as_deref(),
                                 f.head_revision_id.as_deref(),
                             ) {
-                                if let Ok(sibling) =
-                                    materialize_conflict_sibling(&store, cur, &hostname_fallback())
-                                {
-                                    if let Some(ref staging) = *self.staging.lock() {
-                                        if let Ok(bytes) = staging.read_all(cur.id) {
-                                            if !bytes.is_empty() {
-                                                let _ = staging.write_at(sibling.id, 0, &bytes);
-                                            }
+                                continue;
+                            }
+                            if let Ok(sib) =
+                                materialize_conflict_sibling(&store, cur, &hostname_fallback())
+                            {
+                                if let Some(ref st) = *self.staging.lock() {
+                                    if let Ok(bytes) = st.read_all(cur.id) {
+                                        if !bytes.is_empty() {
+                                            let _ = st.write_at(sib.id, 0, &bytes);
                                         }
                                     }
                                 }
-                            } else {
-                                continue;
                             }
                         }
                     }
@@ -107,16 +97,11 @@ impl SyncEngine {
                             if !f.parents.is_empty() {
                                 return None;
                             }
-                            let root_n =
-                                store.find_by_drive_id(account_id, "root").ok().flatten()?;
                             if f.shared_with_me == Some(true) {
-                                self.ensure_shared_with_me_node(
-                                    &store,
-                                    account_id,
-                                    root_n.id as NodeId,
-                                )
-                                .ok()
+                                self.ensure_shared_with_me_node(&store, account_id).ok()
                             } else {
+                                let root_n =
+                                    store.find_by_drive_id(account_id, "root").ok().flatten()?;
                                 Some(root_n.id)
                             }
                         });
@@ -169,13 +154,33 @@ impl SyncEngine {
     ) -> tokio::task::JoinHandle<()> {
         let eng = Arc::clone(self);
         tokio::spawn(async move {
+            let mut consecutive_failures = 0u32;
             loop {
-                match eng.poll_changes(account_id).await {
-                    Ok(n) if n > 0 => debug!(count = n, "applied remote changes"),
-                    Ok(_) => {}
-                    Err(e) => warn!(error = %e, "change poll failed"),
-                }
-                tokio::time::sleep(interval).await;
+                let sleep_for = match eng.poll_changes(account_id).await {
+                    Ok(n) => {
+                        consecutive_failures = 0;
+                        if n > 0 {
+                            debug!(count = n, "applied remote changes");
+                        }
+                        interval
+                    }
+                    Err(e) => {
+                        consecutive_failures = (consecutive_failures + 1).min(4);
+                        if e.to_string().contains("auth") {
+                            warn!(
+                                code = "OD-AUTH-002",
+                                error = %e,
+                                "change poll failed — sign in again if token was revoked"
+                            );
+                        } else {
+                            warn!(error = %e, "change poll failed");
+                        }
+                        interval
+                            .saturating_mul(1u32 << consecutive_failures.min(4))
+                            .min(Duration::from_secs(300))
+                    }
+                };
+                tokio::time::sleep(sleep_for).await;
             }
         })
     }
@@ -238,22 +243,18 @@ mod tests {
         eng.list_explorer_nodes(aid, root_id, true).await.unwrap();
         assert_eq!(eng.poll_changes(aid).await.unwrap(), 0);
 
-        // Dirty file with staging bytes + remote revision bump -> conflict sibling;
-        // plus unparented shared-with-me file + remote remove.
-        let mut dirty = eng
-            .store()
-            .lock()
-            .find_by_drive_id(aid, "d1")
-            .unwrap()
-            .unwrap();
-        dirty.state = NodeState::Dirty;
-        eng.store().lock().upsert_node(&dirty).unwrap();
-        eng.staging
-            .lock()
-            .as_ref()
-            .unwrap()
-            .write_at(dirty.id, 0, b"local-edit")
-            .unwrap();
+        {
+            let store = eng.store().lock();
+            let mut dirty = store.find_by_drive_id(aid, "d1").unwrap().unwrap();
+            dirty.state = NodeState::Dirty;
+            store.upsert_node(&dirty).unwrap();
+            eng.staging
+                .lock()
+                .as_ref()
+                .unwrap()
+                .write_at(dirty.id, 0, b"local-edit")
+                .unwrap();
+        }
         drive.update_metadata("d1", None, None, None);
         drive.add_file(FakeFile {
             id: "swm-1".into(),
@@ -269,7 +270,6 @@ mod tests {
         drive.trash("d1");
         assert!(eng.poll_changes(aid).await.unwrap() >= 3);
 
-        // Start-page-token error increments error counter.
         let bad_aid = Uuid::new_v4();
         drive.push_error(500);
         eng.set_drive_client(

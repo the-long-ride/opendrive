@@ -21,22 +21,34 @@ impl VfsEngine for SyncEngine {
             .lock()
             .list_children(node as i64)
             .map_err(sync_err)?;
-        if children.is_empty() && node > 0 {
+        if node > 0 {
             let maybe_folder = self.store.lock().get_node(node as i64).map_err(sync_err)?;
             if let Some(mut folder) = maybe_folder {
-                if folder.kind == "folder"
+                let should_hydrate = folder.kind == "folder"
                     && !folder.drive_id.is_empty()
                     && (folder.state == NodeState::Placeholder
-                        || folder.drive_id == crate::engine::SHARED_WITH_ME_DRIVE_ID)
-                {
-                    self.hydrate_folder(folder.account_id, node).await?;
-                    folder.state = NodeState::Cached;
-                    let _ = self.store.lock().upsert_node(&folder);
-                    children = self
-                        .store
-                        .lock()
-                        .list_children(node as i64)
-                        .map_err(sync_err)?;
+                        || children.is_empty()
+                        || folder.drive_id == crate::engine::SHARED_WITH_ME_DRIVE_ID);
+                if should_hydrate {
+                    match self.hydrate_folder(folder.account_id, node).await {
+                        Ok(()) => {
+                            folder.state = NodeState::Cached;
+                            let _ = self.store.lock().upsert_node(&folder);
+                            children = self
+                                .store
+                                .lock()
+                                .list_children(node as i64)
+                                .map_err(sync_err)?;
+                        }
+                        Err(err) if children.is_empty() => return Err(err),
+                        Err(err) => {
+                            tracing::warn!(
+                                node,
+                                error = %err,
+                                "using cached children after folder hydrate failure"
+                            );
+                        }
+                    }
                 }
             }
         }

@@ -2,10 +2,10 @@
 
 use crate::runtime::bridge::{AppStateResponse, Bridge};
 use crate::runtime::bridge_types::str_err;
-use crate::runtime::explorer_helpers::{block_on_rt, node_to_entry, run_outside_tokio};
+use crate::runtime::explorer_helpers::{block_on_rt, node_to_entry_for, run_outside_tokio};
 use crate::runtime::media_server::MediaStreamServer;
 use opendrive_core::OpenWithRule;
-use opendrive_sync::{NodeId, SyncSummary};
+use opendrive_sync::{ExplorerSyncStatus, NodeId, SyncSummary};
 use std::path::PathBuf;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -21,6 +21,7 @@ pub struct ExplorerEntry {
     pub size: u64,
     pub modified_ms: i64,
     pub state: opendrive_store::NodeState,
+    pub sync_status: ExplorerSyncStatus,
     pub pinned: bool,
     pub drive_id: String,
 }
@@ -68,6 +69,18 @@ impl Bridge {
             .map_err(str_err)
     }
 
+    pub fn explorer_shared_with_me_node(&self, account_id: Uuid) -> Result<NodeId, String> {
+        self.ctrl
+            .lock()
+            .expect("controller lock")
+            .accounts
+            .get_account(account_id)
+            .map_err(|_| "account not found".to_string())?;
+        self.engine
+            .seed_shared_with_me_root(account_id)
+            .map_err(str_err)
+    }
+
     pub fn explorer_list(
         &self,
         account_id: Uuid,
@@ -88,7 +101,17 @@ impl Bridge {
                 .list_explorer_nodes(account_id, target, force_refresh),
         )
         .map_err(str_err)?;
-        Ok((target, nodes.into_iter().map(node_to_entry).collect()))
+        if self.mounts.is_account_mounted(account_id) {
+            let entries = self.engine.local_reconcile_entries(root);
+            self.mounts.reconcile_account_entries(account_id, &entries);
+        }
+        Ok((
+            target,
+            nodes
+                .into_iter()
+                .map(|n| node_to_entry_for(&self.engine, n))
+                .collect(),
+        ))
     }
 
     pub fn explorer_sync_down(
@@ -101,11 +124,6 @@ impl Bridge {
         let root_node = self.explorer_root_node(account_id)?;
         let mounted_root = self.mounts.mounted_account_path(account_id);
         let cache_dir = self.cache_root_dir();
-        let is_folder = self
-            .engine
-            .get_node(node_id)
-            .map_err(str_err)?
-            .is_some_and(|n| n.is_folder());
         let res = block_on_rt(
             rt.handle(),
             self.engine.sync_down_node(
@@ -117,10 +135,9 @@ impl Bridge {
             ),
         )
         .map_err(str_err)?;
-        if is_folder && self.mounts.is_account_mounted(account_id) {
-            let rel_dirs = self.engine.placeholder_folder_rel_paths(root_node);
-            self.mounts
-                .reconcile_account_placeholders(account_id, &rel_dirs);
+        if self.mounts.is_account_mounted(account_id) {
+            let entries = self.engine.local_reconcile_entries(root_node);
+            self.mounts.reconcile_account_entries(account_id, &entries);
         }
         Ok(res)
     }
@@ -244,9 +261,7 @@ impl Bridge {
     pub fn remove_open_with_rule(&self, index: usize) -> Result<AppStateResponse, String> {
         self.modify_settings(
             |s| {
-                if index < s.open_with_rules.len() {
-                    s.open_with_rules.remove(index);
-                }
+                let _ = (index < s.open_with_rules.len()).then(|| s.open_with_rules.remove(index));
             },
             |_| Ok(()),
         )

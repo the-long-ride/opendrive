@@ -24,7 +24,26 @@ pub trait MountBackend: Send + Sync {
     fn reconcile_placeholders(&self, path: &Path, rel_dirs: &[PathBuf]) {
         let _ = (path, rel_dirs);
     }
+    fn reconcile_placeholder_entries(&self, path: &Path, entries: &[(PathBuf, u64, bool)]) {
+        let _ = (path, entries);
+    }
     fn set_virtual_drive(&self, enabled: bool, letter: &str, root: &Path) -> Result<(), String>;
+    fn set_virtual_drive_with_quota(
+        &self,
+        enabled: bool,
+        letter: &str,
+        root: &Path,
+        _quota: Option<opendrive_platform::ExplorerQuota>,
+    ) -> Result<Option<char>, String> {
+        self.set_virtual_drive(enabled, letter, root)?;
+        if enabled {
+            opendrive_platform::normalize_drive_letter(letter)
+                .map(Some)
+                .map_err(str_err)
+        } else {
+            Ok(None)
+        }
+    }
     fn dehydrate_path(&self, path: &Path) {
         let _ = path;
     }
@@ -64,5 +83,17 @@ impl MountBackend for NullMountBackend {
         opendrive_platform::normalize_drive_letter(letter)
             .map(|_| ())
             .map_err(str_err)
+    }
+
+    fn sync_this_pc_namespace(
+        &self,
+        enabled: bool,
+        root: &Path,
+        _quota: Option<opendrive_platform::ExplorerQuota>,
+    ) -> Result<(), String> {
+        if enabled && root.is_file() {
+            return Err("mount root is not a directory".into());
+        }
+        Ok(())
     }
 }

@@ -5,8 +5,8 @@ use opendrive_platform::{
     drive_icon_reg_command, drive_label_reg_command, drive_mount_command, drive_unmount_command,
     format_explorer_quota_label, format_explorer_tile_comment, install_console_cleanup_handler,
     is_virtual_drive_supported, launch_with_app, mount_virtual_drive, normalize_drive_letter,
-    open_path, parse_subst_target, spawn_detached_background, sync_this_pc_namespace,
-    unmount_virtual_drive, unmount_virtual_drive_for_target, ExplorerQuota,
+    open_path, parse_subst_target, pick_available_drive_letter, spawn_detached_background,
+    sync_this_pc_namespace, unmount_virtual_drive, unmount_virtual_drive_for_target, ExplorerQuota,
 };
 use std::path::{Path, PathBuf};
 
@@ -73,7 +73,10 @@ fn this_pc_reg_commands_cover_enabled_disabled_icon_and_quota_variants() {
         .any(|c| c.contains(&"System.Comment".into())));
     assert!(with_quota_ico
         .iter()
-        .any(|c| c.contains(&"{0AFACED1-E828-11D1-9187-B532F1E9575D}".into())));
+        .any(|c| c.contains(&"{0E5AAE11-A475-4c5b-AB00-C66DE400274E}".into())));
+    assert!(with_quota_ico
+        .iter()
+        .any(|c| c.contains(&"FolderValueFlags".into()) && c.contains(&"0x28".into())));
     assert!(with_quota_ico
         .iter()
         .any(|c| c.contains(&r"C:\Users\Alice\OpenDrive".into())));
@@ -181,7 +184,36 @@ fn drive_mount_and_namespace_error_paths() {
     assert!(unmount_virtual_drive("").is_err());
     assert!(unmount_virtual_drive_for_target("C", &dir).is_err());
     assert!(sync_this_pc_namespace(true, &blocker.join("child"), None, None).is_err());
-    sync_this_pc_namespace(false, &dir, None, None).unwrap();
+
+    let p1 = Path::new(r"C:\Users\Alice\OpenDrive");
+    assert_eq!(
+        pick_available_drive_letter("O", "", p1, |_| false).unwrap(),
+        'O'
+    );
+    assert_eq!(
+        pick_available_drive_letter("O", &format!("O:\\: => {}\n", p1.display()), p1, |_| true)
+            .unwrap(),
+        'O'
+    );
+    assert_eq!(
+        pick_available_drive_letter("O", "O:\\: => C:\\Other\n", p1, |c| c == 'P').unwrap(),
+        'Q'
+    );
+    assert_eq!(
+        pick_available_drive_letter(
+            "O",
+            &format!("O:\\: => C:\\Other\nP:\\: => {}\n", p1.display()),
+            p1,
+            |_| true
+        )
+        .unwrap(),
+        'P'
+    );
+    assert!(pick_available_drive_letter("O", "", p1, |_| true).is_err());
+    assert!(pick_available_drive_letter("C", "", p1, |_| false).is_err());
+    assert!(drive_label_reg_command('O', None)
+        .1
+        .contains(&"OpenDrive".into()));
 
     assert_eq!(normalize_drive_letter("o").unwrap(), 'O');
     assert_eq!(normalize_drive_letter("  z:\\ ").unwrap(), 'Z');

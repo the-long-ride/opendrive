@@ -3,8 +3,8 @@
 use crate::runtime::bridge::Bridge;
 use crate::runtime::explorer_ops::ExplorerEntry;
 use opendrive_core::{classify_media_kind, MediaKind};
-use opendrive_store::Node;
-use opendrive_sync::{is_reparse_point, NodeId};
+use opendrive_store::{Node, NodeState};
+use opendrive_sync::{is_reparse_point, ExplorerSyncStatus, NodeId, SyncEngine};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -35,6 +35,14 @@ pub(super) fn node_to_entry(n: Node) -> ExplorerEntry {
     } else {
         classify_media_kind(&name, n.mime.as_deref())
     };
+    let sync_status = match n.state {
+        NodeState::Placeholder => ExplorerSyncStatus::Cloud,
+        NodeState::Cached if is_folder && !n.pinned => ExplorerSyncStatus::Indexed,
+        NodeState::Cached => ExplorerSyncStatus::FullLocal,
+        NodeState::Dirty => ExplorerSyncStatus::PendingUpload,
+        NodeState::Conflict => ExplorerSyncStatus::Conflict,
+        NodeState::Hydrating => ExplorerSyncStatus::Syncing,
+    };
     ExplorerEntry {
         id: n.id as NodeId,
         name,
@@ -45,9 +53,17 @@ pub(super) fn node_to_entry(n: Node) -> ExplorerEntry {
         size: n.size.max(0) as u64,
         modified_ms: n.modified_ms,
         state: n.state,
+        sync_status,
         pinned: n.pinned,
         drive_id: n.drive_id,
     }
+}
+
+pub(super) fn node_to_entry_for(engine: &SyncEngine, n: Node) -> ExplorerEntry {
+    let sync_status = engine.compute_sync_status(&n);
+    let mut entry = node_to_entry(n);
+    entry.sync_status = sync_status;
+    entry
 }
 
 pub(super) async fn write_http_simple(
@@ -125,6 +141,16 @@ impl Bridge {
         self.modify_settings(|s| s.explorer_folder_cache = enabled, |_| Ok(()))
     }
 
+    pub fn update_ui_font(
+        &self,
+        family: Option<String>,
+    ) -> Result<crate::runtime::bridge::AppStateResponse, String> {
+        let normalized = family
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        self.modify_settings(|s| s.ui_font_family = normalized, |_| Ok(()))
+    }
+
     pub fn explorer_local_entries(
         &self,
         folder_node: NodeId,
@@ -133,7 +159,10 @@ impl Bridge {
             .engine
             .list_cached_children(folder_node)
             .map_err(crate::runtime::bridge_types::str_err)?;
-        Ok(children.into_iter().map(node_to_entry).collect())
+        Ok(children
+            .into_iter()
+            .map(|n| node_to_entry_for(&self.engine, n))
+            .collect())
     }
 }
 

@@ -43,18 +43,22 @@ fn render_account_card(
             ui.vertical(|ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 ui.horizontal(|ui| {
-                    let (dot_r, _) = ui.allocate_exact_size(Vec2::splat(7.0), Sense::hover());
-                    ui.painter()
-                        .rect_filled(dot_r, CornerRadius::same(2), dot_fg);
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(&alias)
-                                .size(12.5)
-                                .strong()
-                                .color(pal.text_primary),
-                        )
-                        .truncate(),
-                    );
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let (dot_r, _) = ui.allocate_exact_size(Vec2::splat(7.0), Sense::hover());
+                        ui.painter()
+                            .rect_filled(dot_r, CornerRadius::same(2), dot_fg);
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&alias)
+                                        .size(12.5)
+                                        .strong()
+                                        .color(pal.text_primary),
+                                )
+                                .truncate(),
+                            );
+                        });
+                    });
                 });
                 ui.add(
                     egui::Label::new(RichText::new(email).size(10.5).color(pal.text_muted))
@@ -119,21 +123,20 @@ pub fn render_explorer_sidebar(
 ) {
     let active_id: Option<Uuid> = app.explorer.active_account_id;
     ui.set_min_width(ui.available_width());
-    ui.horizontal(|ui| {
-        ui.set_min_height(28.0);
-        ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
-        if pill_button(
-            ui,
-            pal,
-            Some(IconKind::ArrowLeft),
-            "Dashboard",
-            ButtonVariant::TactilePill,
-            true,
-            true,
-        ) {
-            actions.push(UiAction::CloseExplorer);
-        }
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+    if ui.available_width() < 236.0 {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+            if pill_button(
+                ui,
+                pal,
+                Some(IconKind::ArrowLeft),
+                "Dashboard",
+                ButtonVariant::TactilePill,
+                true,
+                true,
+            ) {
+                actions.push(UiAction::CloseExplorer);
+            }
             if pill_button(
                 ui,
                 pal,
@@ -143,11 +146,39 @@ pub fn render_explorer_sidebar(
                 true,
                 true,
             ) {
-                actions.push(UiAction::CloseExplorer);
                 actions.push(UiAction::ToggleDrawer(Some(true)));
             }
         });
-    });
+    } else {
+        ui.horizontal(|ui| {
+            ui.set_min_height(28.0);
+            ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
+            if pill_button(
+                ui,
+                pal,
+                Some(IconKind::ArrowLeft),
+                "Dashboard",
+                ButtonVariant::TactilePill,
+                true,
+                true,
+            ) {
+                actions.push(UiAction::CloseExplorer);
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if pill_button(
+                    ui,
+                    pal,
+                    Some(IconKind::Plus),
+                    "New Account",
+                    ButtonVariant::Primary,
+                    true,
+                    true,
+                ) {
+                    actions.push(UiAction::ToggleDrawer(Some(true)));
+                }
+            });
+        });
+    }
     ui.add_space(8.0);
     ui.label(
         RichText::new("Drive Accounts")

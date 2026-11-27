@@ -6,14 +6,14 @@ kind: "architecture"
 status: "verified"
 summary: "Node.js scripts enforcing LOC/compression limits, static safety checks, cross-OS desktop binary launching, PR change routing, and 95% coverage gates."
 tags: ["ci", "quality-gate", "lint", "loc", "coverage", "desktop-launch"]
-source_paths: ["scripts/ci-changes.mjs", "scripts/launch-desktop.mjs", "scripts/lib/desktop-launch.mjs", "scripts/lib/source-policy.mjs", "scripts/lint.mjs", "scripts/loc-lint.mjs", "scripts/release-gate.sh", "scripts/test-coverage-node.mjs", "scripts/test-coverage-rust.mjs", "scripts/test/ci-changes.test.mjs", "scripts/test/desktop-launch.test.mjs", "scripts/test/lint.test.mjs", "scripts/test/loc-lint.test.mjs", "scripts/test/quality-gate.test.mjs", "scripts/test/release-gate.test.mjs", "scripts/test/source-policy.test.mjs"]
+source_paths: ["scripts/ci-changes.mjs", "scripts/generate-release-notes.mjs", "scripts/launch-desktop.mjs", "scripts/lib/desktop-launch.mjs", "scripts/lib/source-policy.mjs", "scripts/lint.mjs", "scripts/loc-lint.mjs", "scripts/release-gate.sh", "scripts/test-coverage-node.mjs", "scripts/test-coverage-rust.mjs", "scripts/test/ci-changes.test.mjs", "scripts/test/desktop-launch.test.mjs", "scripts/test/lint.test.mjs", "scripts/test/loc-lint.test.mjs", "scripts/test/quality-gate.test.mjs", "scripts/test/release-gate.test.mjs", "scripts/test/release-notes.test.mjs", "scripts/test/release-packaging.test.mjs", "scripts/test/source-policy.test.mjs"]
 related_specs: ["architecture.workspace-overview", "feature.control-center-ui", "interface.cli-http-bridge"]
-last_doc_update_at: "2026-11-26T09:51:00Z"
-last_verified_at: "2026-11-26T09:51:00Z"
-last_verified_code_commit: "87c4603636ce9dd8cab72a3d2260e7b1e8482fc3"
-last_source_change_commit: "aa2135c5d17ce0016d4fa42bb2c2705bbba7c709"
-last_source_change_at: "2026-11-26T14:30:00+07:00"
-source_fingerprint: "sha256:cf818651d7906c901faa9a434b3abf582d13ee364f50310c8369fb423eeca4d7"
+last_doc_update_at: "2026-11-26T17:06:00Z"
+last_verified_at: "2026-11-26T17:06:00Z"
+last_verified_code_commit: "91d18b7a858b4edc92690c91562150ceb6622d5a"
+last_source_change_commit: "91d18b7a858b4edc92690c91562150ceb6622d5a"
+last_source_change_at: "2026-11-26T22:55:18+07:00"
+source_fingerprint: "sha256:88f317bc8b97a94ed36bdb37b02d60b8a74b3fa2ef8e62d40f95728f17e5005b"
 ---
 # Quality Gate, Desktop Launcher, and CI Scripts
 
@@ -32,7 +32,7 @@ Provides cross-OS desktop launch helpers, policy linters, PR area classification
 - **Coverage gates (`test-coverage-node.mjs`, `test-coverage-rust.mjs`)**:
   - Node gate runs `c8` with `--check-coverage` at `95%` minimum for lines, statements, functions, and branches across `scripts/test/*.test.mjs`, excluding `scripts/test/**`, `scripts/launch-desktop.mjs`, and `scripts/test-coverage-*.mjs`.
   - Rust gate runs `cargo llvm-cov --workspace --locked` at `95%` minimum for lines, functions, and regions, ignoring `main.rs`, `types.rs`, `keyring.rs`, `fuse_sys.rs`, `cfapi_sys.rs`, and `shell/{window,tray,tray_loop}.rs`.
-- **Release tag gate (`release-gate.sh`)**: Supports `ARTIFACT_ONLY=true` (emitting `v{version}-manual-{sha7}`), validates semver tags (accepting annotated `refs/tags/${tag}^{commit}` targets that are ancestors of `refs/remotes/origin/main`), verifies `Cargo.toml` `[workspace.package]` `version`, and writes `tag`, `version`, and `ref_sha` to `GITHUB_OUTPUT`.
+- **Release tag gate & notes (`release-gate.sh`, `generate-release-notes.mjs`)**: `release-gate.sh` supports `ARTIFACT_ONLY=true` (emitting `v{version}-manual-{sha7}`), validates semver tags (accepting annotated `refs/tags/${tag}^{commit}` targets that are ancestors of `refs/remotes/origin/main`), verifies `Cargo.toml` `[workspace.package]` `version`, and writes `tag`, `version`, and `ref_sha` to `GITHUB_OUTPUT`. `generate-release-notes.mjs` renders collapsible `<details>` changelog sections without redundant version headings, direct download links for all OS installers/portables, and a clickable GitHub avatar + `@username` contributor flow layout.
 
 ## Code map
 - `scripts/launch-desktop.mjs` — Cross-OS VS Code `F5` / `npm run desktop` launcher building and starting the native `opendrive` binary.
@@ -42,6 +42,7 @@ Provides cross-OS desktop launch helpers, policy linters, PR area classification
 - `scripts/lint.mjs` — Static scanner banning `eval(` and `child_process` `exec(`, enforcing unused-symbol checks via `oxlint`, and verifying Cargo workspace manifest fields/dependencies are used by member crates.
 - `scripts/loc-lint.mjs` — Zero-exception tracked + untracked file runner enforcing `sourceLimit` and `looksArtificiallyCompressed`.
 - `scripts/release-gate.sh` — Release tag validation and gate script.
+- `scripts/generate-release-notes.mjs` — GitHub Release body generator (changelog extract, direct asset links, clickable contributor avatar flow layout).
 - `scripts/test-coverage-node.mjs` — `collectTestFiles` and `runNodeCoverage` invoking `c8` at 95% thresholds.
 - `scripts/test-coverage-rust.mjs` — `runRustCoverage` invoking `cargo llvm-cov` at 95% thresholds with platform/window-loop exclusions.
 - `scripts/test/desktop-launch.test.mjs` — Tests covering cross-OS executable path resolution and cargo/app CLI argument builders.
@@ -50,11 +51,13 @@ Provides cross-OS desktop launch helpers, policy linters, PR area classification
 - `scripts/test/loc-lint.test.mjs` — Tests covering tracked & untracked limit failures, gitignored/excluded paths & extensions, compressed lines, and non-git error exit.
 - `scripts/test/quality-gate.test.mjs` — Policy tests validating zero-exception `loc-lint.mjs`, `package.json`, `.github/workflows/quality-gate.yml`, `rust-toolchain.toml`, `.gitignore`, `.prettierignore`, `.vscode/launch.json`, and `knip.json`.
 - `scripts/test/release-gate.test.mjs` — Tests covering `release-gate.sh` tag and dispatch behavior.
+- `scripts/test/release-notes.test.mjs` — Tests covering changelog extraction, download link tables, contributor avatars/flow HTML, and CLI execution.
+- `scripts/test/release-packaging.test.mjs` — Tests verifying GitHub README logo URL, `the-long-ride` author metadata, generated PNG/ICO icon headers, macOS iconset script rules, and `OD-*` coverage across `error-codes.md` and `llm.txt`.
 - `scripts/test/source-policy.test.mjs` — Tests verifying language limits, exclusions, physical line counting, and compression detection.
 
 ## Verification
 Verified in Node test and coverage runs:
-- `scripts/test/*.test.mjs`: 26 Node tests across 7 files executed via `npm run test:scripts` and `npm run test:coverage:node`.
+- `scripts/test/*.test.mjs`: 37 Node tests across 9 files executed via `npm run test:scripts` and `npm run test:coverage:node`.
 - Note: `scripts/launch-desktop.mjs` and `scripts/test-coverage-*.mjs` are excluded from `c8` coverage enforcement; `scripts/test/quality-gate.test.mjs` statically asserts threshold flags, launch config, and workflow alignment.
 
 ## Related documentation

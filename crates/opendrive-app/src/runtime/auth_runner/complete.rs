@@ -202,6 +202,13 @@ impl Bridge {
             }
             result
         };
+        let drive = crate::runtime::mount_manager::token_refresh::attach_account_refresher(
+            drive,
+            account_id,
+            &self.ctrl,
+            &self.secrets,
+            self.mounts.token_url_override(),
+        );
         self.engine.set_drive_client(account_id, drive);
         let root_id = self
             .engine

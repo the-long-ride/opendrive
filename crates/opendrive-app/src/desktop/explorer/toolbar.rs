@@ -1,20 +1,22 @@
 //! Explorer header toolbar: breadcrumbs, search box, List/Grid toggle, refresh, and responsive row layout.
 
 use super::file_ops_modal::ExplorerClipboard;
+use super::file_ops_ui::{render_popup_menu_items, PopupMenuItem};
 use super::selection::ToolbarSelection;
 use super::toolbar_actions::{
     render_action_controls, render_upload_menu, stable_action_controls_width,
 };
-use super::{AccountExplorerSession, ExplorerViewMode};
+use super::{AccountExplorerSession, ExplorerScope, ExplorerViewMode};
 use crate::design::formatters::StatusTone;
 use crate::design::theme::ThemePalette;
 use crate::design::widgets::{
-    paint_icon, pill_button, pill_button_width, status_pill, ButtonVariant, IconKind,
+    menu_dropdown_button, paint_icon, pill_button, pill_button_width, status_pill, ButtonVariant,
+    IconKind,
 };
 use crate::desktop::UiAction;
 use eframe::egui::{
-    self, Align, Align2, CornerRadius, Frame, Layout, Margin, RichText, Sense, Shape, Stroke,
-    StrokeKind, TextEdit, Vec2,
+    self, Align, Align2, CornerRadius, Frame, Layout, Margin, Sense, Shape, Stroke, StrokeKind,
+    TextEdit, Vec2,
 };
 use eframe::epaint::RectShape;
 use opendrive_core::Account;
@@ -31,30 +33,56 @@ fn crumb_label(s: &str, max_c: usize) -> String {
 fn render_breadcrumbs(
     ui: &mut egui::Ui,
     pal: &ThemePalette,
+    scope: ExplorerScope,
     crumbs: &[(NodeId, String)],
+    has_acct: bool,
     actions: &mut Vec<UiAction>,
 ) {
-    if crumbs.is_empty() {
-        let rt = RichText::new("My Drive")
-            .size(15.0)
-            .strong()
-            .color(pal.text_primary);
-        ui.label(rt);
-        return;
-    }
     ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
-    let (last, max_c) = (crumbs.len() - 1, if crumbs.len() > 1 { 24 } else { 32 });
-    for (idx, (_, label)) in crumbs.iter().enumerate() {
-        if idx > 0 {
-            let (cr, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
-            paint_icon(ui.painter(), cr, IconKind::ChevronRight, pal.text_muted);
-        }
+    let root_var = if crumbs.len() <= 1 {
+        ButtonVariant::TactilePill
+    } else {
+        ButtonVariant::Default
+    };
+    let resp = menu_dropdown_button(ui, pal, None, scope.label(), root_var, has_acct);
+    if has_acct {
+        egui::Popup::menu(&resp).show(|ui| {
+            let var_for = |s: ExplorerScope| {
+                if s == scope {
+                    ButtonVariant::Toggle { selected: true }
+                } else {
+                    ButtonVariant::Default
+                }
+            };
+            let items = [
+                PopupMenuItem::new(
+                    IconKind::Folder,
+                    "My Drive",
+                    var_for(ExplorerScope::MyDrive),
+                    true,
+                    UiAction::ExplorerSwitchScope(ExplorerScope::MyDrive),
+                ),
+                PopupMenuItem::new(
+                    IconKind::Cloud,
+                    "Shared with me",
+                    var_for(ExplorerScope::SharedWithMe),
+                    true,
+                    UiAction::ExplorerSwitchScope(ExplorerScope::SharedWithMe),
+                ),
+            ];
+            render_popup_menu_items(ui, pal, &items, actions);
+        });
+    }
+    let last = crumbs.len().saturating_sub(1);
+    for (idx, (_, label)) in crumbs.iter().enumerate().skip(1) {
+        let (cr, _) = ui.allocate_exact_size(Vec2::splat(14.0), Sense::hover());
+        paint_icon(ui.painter(), cr, IconKind::ChevronRight, pal.text_muted);
         let v = if idx == last {
             ButtonVariant::TactilePill
         } else {
             ButtonVariant::Default
         };
-        if pill_button(ui, pal, None, &crumb_label(label, max_c), v, true, true) {
+        if pill_button(ui, pal, None, &crumb_label(label, 24), v, true, true) {
             actions.push(UiAction::ExplorerNavigateBreadcrumb(idx));
         }
     }
@@ -187,17 +215,21 @@ pub fn render_explorer_toolbar(
     actions: &mut Vec<UiAction>,
 ) {
     let has_acct = active_acct.is_some();
-    let up_ok = active_acct.is_some_and(|a| !a.read_only);
-    let tsel = ToolbarSelection::from_session(session.as_deref());
+    let scope = session
+        .as_deref()
+        .map_or(ExplorerScope::MyDrive, |s| s.scope);
     let crumbs = session
         .as_deref()
         .map_or_else(Vec::new, |s| s.breadcrumbs.clone());
+    let at_swm_root = scope == ExplorerScope::SharedWithMe && crumbs.len() <= 1;
+    let up_ok = active_acct.is_some_and(|a| !a.read_only) && !at_swm_root;
+    let tsel = ToolbarSelection::from_session(session.as_deref());
 
     ui.scope(|ui| {
         ui.spacing_mut().interact_size.y = 28.0;
         ui.horizontal_wrapped(|ui| {
             ui.set_min_height(28.0);
-            render_breadcrumbs(ui, pal, &crumbs, actions);
+            render_breadcrumbs(ui, pal, scope, &crumbs, has_acct, actions);
         });
         ui.add_space(8.0);
 

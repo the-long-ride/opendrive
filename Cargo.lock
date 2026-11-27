@@ -2796,7 +2796,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-app"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "eframe",
@@ -2825,7 +2825,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-auth"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "keyring",
@@ -2845,7 +2845,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -2855,7 +2855,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-drive"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytes",
  "opendrive-fake-drive",
@@ -2868,7 +2868,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-fake-drive"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "tokio",
@@ -2876,7 +2876,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-fs-linux"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "fuser",
  "libc",
@@ -2887,7 +2887,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-fs-macos"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2902,7 +2902,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-fs-windows"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytes",
  "cloud-filter",
@@ -2915,7 +2915,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-platform"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "dirs",
  "open",
@@ -2925,7 +2925,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-store"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "rusqlite",
  "thiserror 1.0.69",
@@ -2934,7 +2934,7 @@ dependencies = [
 
 [[package]]
 name = "opendrive-sync"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "async-trait",
  "bytes",

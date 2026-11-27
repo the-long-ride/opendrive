@@ -134,35 +134,38 @@ pub(super) fn render_browser_oauth_body(
     if let Some(session) = auth_session.filter(|s| s.mode == ConnectAuthMode::BrowserOAuth) {
         render_oauth_pending(ui, pal, session, actions);
     } else {
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            if pill_button(
-                ui,
-                pal,
-                Some(IconKind::External),
-                "Sign in with Google",
-                ButtonVariant::Primary,
-                false,
-                true,
-            ) {
-                actions.push(UiAction::StartBrowserOAuth {
-                    open_browser: true,
-                    copy_link: false,
-                });
-            }
-            if pill_button(
-                ui,
-                pal,
-                Some(IconKind::Copy),
-                "Copy Link",
-                ButtonVariant::TactilePill,
-                false,
-                true,
-            ) {
-                actions.push(UiAction::StartBrowserOAuth {
-                    open_browser: false,
-                    copy_link: true,
-                });
-            }
+        ui.horizontal(|ui| {
+            ui.set_min_width(ui.available_width());
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if pill_button(
+                    ui,
+                    pal,
+                    Some(IconKind::External),
+                    "Sign in with Google",
+                    ButtonVariant::Primary,
+                    false,
+                    true,
+                ) {
+                    actions.push(UiAction::StartBrowserOAuth {
+                        open_browser: true,
+                        copy_link: false,
+                    });
+                }
+                if pill_button(
+                    ui,
+                    pal,
+                    Some(IconKind::Copy),
+                    "Copy Link",
+                    ButtonVariant::TactilePill,
+                    false,
+                    true,
+                ) {
+                    actions.push(UiAction::StartBrowserOAuth {
+                        open_browser: false,
+                        copy_link: true,
+                    });
+                }
+            });
         });
     }
 }
@@ -200,38 +203,41 @@ pub(super) fn render_service_account_body(
     render_form_error(ui, pal, form_error);
     ui.add_space(12.0);
 
-    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-        if auth_session.is_some() {
-            let _ = pill_button(
+    ui.horizontal(|ui| {
+        ui.set_min_width(ui.available_width());
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if auth_session.is_some() {
+                let _ = pill_button(
+                    ui,
+                    pal,
+                    Some(IconKind::Key),
+                    "Connecting...",
+                    ButtonVariant::Primary,
+                    false,
+                    false,
+                );
+                if pill_button(
+                    ui,
+                    pal,
+                    Some(IconKind::Close),
+                    "Cancel",
+                    ButtonVariant::Danger,
+                    false,
+                    true,
+                ) {
+                    actions.push(UiAction::CancelAuth);
+                }
+            } else if pill_button(
                 ui,
                 pal,
                 Some(IconKind::Key),
-                "Connecting...",
+                "Connect Service Account",
                 ButtonVariant::Primary,
-                false,
-                false,
-            );
-            if pill_button(
-                ui,
-                pal,
-                Some(IconKind::Close),
-                "Cancel",
-                ButtonVariant::Danger,
                 false,
                 true,
             ) {
-                actions.push(UiAction::CancelAuth);
+                actions.push(UiAction::StartServiceAccount);
             }
-        } else if pill_button(
-            ui,
-            pal,
-            Some(IconKind::Key),
-            "Connect Service Account",
-            ButtonVariant::Primary,
-            false,
-            true,
-        ) {
-            actions.push(UiAction::StartServiceAccount);
-        }
+        });
     });
 }

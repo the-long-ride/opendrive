@@ -108,10 +108,11 @@ async fn titlebar_sync_toggle_divider_compact_and_tooltip_branches() {
         .max_by(|a, b| a.total_cmp(b))
         .expect("thin titlebar divider");
     btns.sort_by(|a, b| a.left().total_cmp(&b.left()));
-    assert_eq!(btns.len(), 5);
-    let (sync_r, settings_r, min_r) = (btns[0], btns[1], btns[2]);
-    assert!(color_r.right() < sync_r.left() && sync_r.right() < settings_r.left());
-    assert!(settings_r.right() < div_x && div_x < min_r.left());
+    assert_eq!(btns.len(), 7);
+    let (sync_r, term_r, settings_r, help_r, min_r) = (btns[0], btns[1], btns[2], btns[3], btns[4]);
+    assert!(color_r.right() < sync_r.left() && help_r.right() < div_x && div_x < min_r.left());
+    assert!(sync_r.right() < term_r.left() && term_r.right() < settings_r.left());
+    assert!(settings_r.right() < help_r.left());
 
     let hover = |pos: Pos2, ctx: &egui::Context, app: &mut ControlCenterApp| {
         let ev = vec![Event::PointerMoved(pos)];

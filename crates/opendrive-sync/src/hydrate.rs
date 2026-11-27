@@ -26,14 +26,13 @@ impl SyncEngine {
         &self,
         store: &Store,
         account_id: Uuid,
-        root_node: NodeId,
     ) -> Result<i64> {
         if let Some(mut swm) = store
             .find_by_drive_id(account_id, SHARED_WITH_ME_DRIVE_ID)
             .map_err(sync_err)?
         {
-            if swm.parent_id != Some(root_node as i64) {
-                swm.parent_id = Some(root_node as i64);
+            if swm.parent_id != Some(0) {
+                swm.parent_id = Some(0);
                 store.upsert_node(&swm).map_err(sync_err)?;
             }
             return Ok(swm.id);
@@ -44,7 +43,7 @@ impl SyncEngine {
                 id: swm_id,
                 account_id,
                 drive_id: SHARED_WITH_ME_DRIVE_ID.into(),
-                parent_id: Some(root_node as i64),
+                parent_id: Some(0),
                 name: "Shared with me".into(),
                 display_name: "Shared with me".into(),
                 kind: "folder".into(),
@@ -128,14 +127,11 @@ impl SyncEngine {
 
         let store = self.store.lock();
         let swm_id = if is_root {
-            Some(self.ensure_shared_with_me_node(&store, account_id, parent_node)?)
+            Some(self.ensure_shared_with_me_node(&store, account_id)?)
         } else {
             None
         };
         let mut seen_ids = HashSet::new();
-        if is_root {
-            seen_ids.insert(SHARED_WITH_ME_DRIVE_ID.to_string());
-        }
         for f in all_files {
             let target_parent_id = if is_swm {
                 f.parents

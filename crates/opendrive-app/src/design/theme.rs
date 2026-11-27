@@ -239,7 +239,7 @@ pub fn apply_studio_theme(ctx: &egui::Context, mode: ThemeMode) {
     ctx.set_visuals_of(egui_theme, visuals.clone());
     ctx.set_visuals(visuals);
 
-    install_unicode_fallback_fonts(ctx);
+    crate::design::theme_fonts::apply_ui_font(ctx, None, None);
     ctx.global_style_mut(|style| {
         style.spacing.item_spacing = egui::vec2(8.0, 8.0);
         style.spacing.button_padding = egui::vec2(12.0, 6.0);
@@ -255,42 +255,4 @@ pub fn apply_studio_theme(ctx: &egui::Context, mode: ThemeMode) {
             style.text_styles.insert(st, id);
         }
     });
-}
-
-fn install_unicode_fallback_fonts(ctx: &egui::Context) {
-    let id = egui::Id::unique("od_unicode_fonts");
-    if ctx.data_mut(|d| std::mem::replace(d.get_temp_mut_or_default::<bool>(id), true)) {
-        return;
-    }
-    static FONTS: std::sync::OnceLock<Vec<(&'static str, std::sync::Arc<egui::FontData>)>> =
-        std::sync::OnceLock::new();
-    let fonts = FONTS.get_or_init(|| {
-        let mut out = Vec::new();
-        let groups = [
-            ("od_lat", "C:\\Windows\\Fonts\\segoeui.ttf|/System/Library/Fonts/Supplemental/Arial Unicode.ttf|/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-            ("od_cjk", "C:\\Windows\\Fonts\\msyh.ttc|C:\\Windows\\Fonts\\malgun.ttf|/System/Library/Fonts/PingFang.ttc|/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-        ];
-        for (k, ps) in groups {
-            if let Some(b) = ps.split('|').find_map(|p| std::fs::read(p).ok()) {
-                out.push((k, std::sync::Arc::new(egui::FontData::from_owned(b))));
-            }
-        }
-        out
-    });
-    if !fonts.is_empty() {
-        let mut defs = egui::FontDefinitions::default();
-        for (k, data) in fonts {
-            defs.font_data
-                .insert((*k).to_string(), std::sync::Arc::clone(data));
-            defs.families
-                .entry(egui::FontFamily::Proportional)
-                .or_default()
-                .push((*k).to_string());
-            defs.families
-                .entry(egui::FontFamily::Monospace)
-                .or_default()
-                .push((*k).to_string());
-        }
-        ctx.set_fonts(defs);
-    }
 }

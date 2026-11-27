@@ -76,7 +76,7 @@ async fn sync_engine_vfs_upload_and_remote_changes() {
     let root_id = engine.seed_root_account(acct, "MyDrive").unwrap();
     engine.hydrate_folder(acct, root_id).await.unwrap();
     let page = engine.list(root_id, None).await.unwrap();
-    assert_eq!(page.entries.len(), 2);
+    assert_eq!(page.entries.len(), 1);
     let remote_attr = engine
         .lookup(root_id, OsStr::new("readme.txt"))
         .await

@@ -26,18 +26,26 @@ fn collect_texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<String> {
     out
 }
 
-fn run_size(ctx: &egui::Context, size: Vec2, app: &mut ControlCenterApp) -> Vec<String> {
-    let mut texts = Vec::new();
+fn run_shapes(
+    ctx: &egui::Context,
+    size: Vec2,
+    mut draw: impl FnMut(&mut egui::Ui),
+) -> Vec<egui::epaint::ClippedShape> {
+    let mut shapes = Vec::new();
     for _ in 0..2 {
         let raw = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
             ..Default::default()
         };
-        let mut out = ctx.run_ui(raw, |ui| app.render_root(ui));
+        let mut out = ctx.run_ui(raw, |ui| draw(ui));
         out.textures_delta.clear();
-        texts = collect_texts(&out.shapes);
+        shapes = out.shapes;
     }
-    texts
+    shapes
+}
+
+fn run_size(ctx: &egui::Context, size: Vec2, app: &mut ControlCenterApp) -> Vec<String> {
+    collect_texts(&run_shapes(ctx, size, |ui| app.render_root(ui)))
 }
 
 #[test]
@@ -72,7 +80,15 @@ fn modals_layout_subtitle_removal_and_titlebar_bottom_work() {
     let mut actions = Vec::new();
     let mut out = ctx.run_ui(raw, |ui| {
         let pal = palette(ThemeMode::DarkStudio);
-        top_y = render_custom_titlebar(ui, &pal, ThemeMode::DarkStudio, &app.state, &mut actions);
+        top_y = render_custom_titlebar(
+            ui,
+            &pal,
+            ThemeMode::DarkStudio,
+            &app.state,
+            false,
+            false,
+            &mut actions,
+        );
     });
     out.textures_delta.clear();
     assert!(top_y > 20.0);
@@ -174,16 +190,7 @@ fn settings_modal_width_is_768_and_open_rules_card_supports_search_validation_an
     app.settings_open = true;
     let ctx = egui::Context::default();
 
-    let mut frame_shapes = Vec::new();
-    for _ in 0..2 {
-        let raw = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 720.0))),
-            ..Default::default()
-        };
-        let mut out = ctx.run_ui(raw, |ui| app.render_root(ui));
-        out.textures_delta.clear();
-        frame_shapes = out.shapes;
-    }
+    let frame_shapes = run_shapes(&ctx, Vec2::new(960.0, 720.0), |ui| app.render_root(ui));
     let find_text_rect = |shapes: &[egui::epaint::ClippedShape], exact: &str| -> Option<Rect> {
         fn walk(s: &Shape, exact: &str) -> Option<Rect> {
             match s {
@@ -213,21 +220,11 @@ fn settings_modal_width_is_768_and_open_rules_card_supports_search_validation_an
     assert!((search_r.center().y - add_r.center().y).abs() < 8.0);
 
     let render_rules_shapes = |app: &mut ControlCenterApp| {
-        let mut shapes = Vec::new();
-        for _ in 0..2 {
-            let raw = RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(720.0, 500.0))),
-                ..Default::default()
-            };
+        run_shapes(&ctx, Vec2::new(720.0, 500.0), |ui| {
             let (mut acts, pal) = (Vec::new(), palette(ThemeMode::DarkStudio));
-            let mut out = ctx.run_ui(raw, |ui| {
-                let rules = &app.state.settings.open_with_rules;
-                render_open_rules_section(ui, &pal, rules, &mut app.open_rule_draft, &mut acts);
-            });
-            out.textures_delta.clear();
-            shapes = out.shapes;
-        }
-        shapes
+            let rules = &app.state.settings.open_with_rules;
+            render_open_rules_section(ui, &pal, rules, &mut app.open_rule_draft, &mut acts);
+        })
     };
 
     app.apply_action(UiAction::StartAddOpenWithRule);
@@ -248,10 +245,15 @@ fn settings_modal_width_is_768_and_open_rules_card_supports_search_validation_an
         find_r("Cancel"),
         find_r("Save"),
     );
-    assert!((ext_r.center().y - app_r.center().y).abs() < 4.0);
-    assert!(app_r.left() > ext_r.left() && brw_r.left() > app_r.left());
-    assert!((title_r.center().y - save_r.center().y).abs() < 6.0);
-    assert!((cancel_r.center().y - save_r.center().y).abs() < 4.0);
+    assert!(
+        (ext_r.center().y - app_r.center().y).abs() < 4.0
+            && app_r.left() > ext_r.left()
+            && brw_r.left() > app_r.left()
+    );
+    assert!(
+        (title_r.center().y - save_r.center().y).abs() < 6.0
+            && (cancel_r.center().y - save_r.center().y).abs() < 4.0
+    );
     assert!(
         title_r.right() < cancel_r.left()
             && cancel_r.right() < save_r.left()
@@ -276,7 +278,6 @@ fn settings_modal_width_is_768_and_open_rules_card_supports_search_validation_an
     app.open_rule_draft.pattern = "mp4, webm".into();
     app.apply_action(UiAction::SaveOpenWithRule);
     assert_eq!(app.state.settings.open_with_rules[0].pattern, "mp4, webm");
-
     app.apply_action(UiAction::StartAddOpenWithRule);
     (app.open_rule_draft.pattern, app.open_rule_draft.app_command) =
         ("pdf".into(), "sumatrapdf".into());
@@ -284,7 +285,6 @@ fn settings_modal_width_is_768_and_open_rules_card_supports_search_validation_an
     app.open_rule_draft.search_query = "webm".into();
     let flt = collect_texts(&render_rules_shapes(&mut app));
     assert!(flt.iter().any(|t| t == "mp4, webm") && !flt.iter().any(|t| t == "sumatrapdf"));
-
     let ch = bridge.controller_handle();
     ch.lock()
         .unwrap()

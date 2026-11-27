@@ -23,9 +23,8 @@ impl Bridge {
 
     fn sync_mount_placeholders(&self, account_id: Uuid, root_node: NodeId) {
         if self.mounts.is_account_mounted(account_id) {
-            let rel_dirs = self.engine.placeholder_folder_rel_paths(root_node);
-            self.mounts
-                .reconcile_account_placeholders(account_id, &rel_dirs);
+            let entries = self.engine.local_reconcile_entries(root_node);
+            self.mounts.reconcile_account_entries(account_id, &entries);
         }
     }
 

@@ -114,11 +114,41 @@ fn render_settings_button(ui: &mut egui::Ui, pal: &ThemePalette, actions: &mut V
     }
 }
 
+fn render_terminal_button(
+    ui: &mut egui::Ui,
+    pal: &ThemePalette,
+    terminal_open: bool,
+    actions: &mut Vec<UiAction>,
+) {
+    let variant = ButtonVariant::Toggle {
+        selected: terminal_open,
+    };
+    if pill_button(ui, pal, Some(IconKind::Terminal), "", variant, true, true) {
+        actions.push(UiAction::ToggleTerminal(None));
+    }
+}
+
+fn render_support_button(
+    ui: &mut egui::Ui,
+    pal: &ThemePalette,
+    support_open: bool,
+    actions: &mut Vec<UiAction>,
+) {
+    let variant = ButtonVariant::Toggle {
+        selected: support_open,
+    };
+    if pill_button(ui, pal, Some(IconKind::HelpBook), "", variant, true, true) {
+        actions.push(UiAction::ToggleSupportModal(None));
+    }
+}
+
 pub fn render_custom_titlebar(
     ui: &mut egui::Ui,
     pal: &ThemePalette,
     mode: ThemeMode,
     state: &AppStateResponse,
+    terminal_open: bool,
+    support_open: bool,
     actions: &mut Vec<UiAction>,
 ) -> f32 {
     let ctx = ui.ctx().clone();
@@ -162,7 +192,9 @@ pub fn render_custom_titlebar(
                     render_window_controls(ui, pal, is_max, actions);
                     if !compact {
                         vertical_divider(ui, pal);
+                        render_support_button(ui, pal, support_open, actions);
                         render_settings_button(ui, pal, actions);
+                        render_terminal_button(ui, pal, terminal_open, actions);
                         render_sync_toggle(ui, pal, has_accounts, all_paused, actions);
                         render_theme_switch(ui, pal, mode, actions);
                     }
@@ -173,7 +205,9 @@ pub fn render_custom_titlebar(
                 ui.horizontal_wrapped(|ui| {
                     render_theme_switch(ui, pal, mode, actions);
                     render_sync_toggle(ui, pal, has_accounts, all_paused, actions);
+                    render_terminal_button(ui, pal, terminal_open, actions);
                     render_settings_button(ui, pal, actions);
+                    render_support_button(ui, pal, support_open, actions);
                 });
             }
             if drag_resp.drag_started_by(egui::PointerButton::Primary) {

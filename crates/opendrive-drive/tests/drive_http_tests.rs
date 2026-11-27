@@ -37,7 +37,7 @@ async fn about_and_shared_drives() {
     assert_eq!(drives.drives[0].name, "Engineering");
 
     let default_client = DriveClient::new("tok-default".into());
-    assert_eq!(default_client.access_token, "tok-default");
+    assert_eq!(default_client.access_token(), "tok-default");
     handle.abort();
 }
 

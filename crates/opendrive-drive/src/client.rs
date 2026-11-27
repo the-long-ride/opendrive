@@ -1,10 +1,12 @@
 //! Drive v3 HTTP client implementation (about, drives, files, download).
 
 use crate::retry::with_backoff;
+use crate::token::{execute_authed_request, TokenRefresher, TokenStore};
 use crate::types::{About, DriveError, FileJson, FileList, Result, SharedDrive, SharedDriveList};
-use bytes::Bytes;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use std::sync::Arc;
+use std::time::Duration;
 
 const BASE: &str = "https://www.googleapis.com/drive/v3";
 const UPLOAD_BASE: &str = "https://www.googleapis.com/upload/drive/v3";
@@ -13,7 +15,7 @@ pub(crate) const FILE_FIELDS: &str =
 
 #[derive(Clone)]
 pub struct DriveClient {
-    pub access_token: String,
+    token: Arc<TokenStore>,
     pub(crate) http: reqwest::Client,
     pub(crate) api_base: String,
     pub(crate) upload_base: String,
@@ -30,15 +32,25 @@ impl DriveClient {
         upload_base: impl Into<String>,
     ) -> Self {
         Self {
-            access_token,
+            token: Arc::new(TokenStore::new(access_token)),
             http: reqwest::Client::new(),
             api_base: api_base.into().trim_end_matches('/').to_string(),
             upload_base: upload_base.into().trim_end_matches('/').to_string(),
         }
     }
 
-    pub(crate) fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        req.bearer_auth(&self.access_token)
+    pub fn with_token_refresher(mut self, refresher: Arc<dyn TokenRefresher>) -> Self {
+        self.token = Arc::new(self.token.with_refresher(refresher));
+        self
+    }
+
+    pub fn with_proactive_refresh_age(mut self, age: Duration) -> Self {
+        self.token = Arc::new(self.token.with_proactive_age(age));
+        self
+    }
+
+    pub fn access_token(&self) -> String {
+        self.token.current_token()
     }
 
     pub(crate) async fn check(&self, resp: reqwest::Response) -> Result<reqwest::Response> {
@@ -59,15 +71,19 @@ impl DriveClient {
         Ok(resp)
     }
 
-    pub(crate) async fn send_json<T: DeserializeOwned>(
+    pub(crate) async fn send_authed(
         &self,
-        req: reqwest::RequestBuilder,
+        build: impl Fn(&str) -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response> {
+        let resp = execute_authed_request(&self.token, build).await?;
+        self.check(resp).await
+    }
+
+    pub(crate) async fn send_authed_json<T: DeserializeOwned>(
+        &self,
+        build: impl Fn(&str) -> reqwest::RequestBuilder,
     ) -> Result<T> {
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| DriveError::Http(e.to_string()))?;
-        let resp = self.check(resp).await?;
+        let resp = self.send_authed(build).await?;
         resp.json()
             .await
             .map_err(|e| DriveError::Http(e.to_string()))
@@ -98,13 +114,15 @@ impl DriveClient {
             limit: Option<String>,
             usage: Option<String>,
         }
-        let req = self
-            .auth(self.http.get(format!("{}/about", self.api_base)))
-            .query(&[(
-                "fields",
-                "user(emailAddress,displayName,photoLink),storageQuota",
-            )]);
-        let body: Resp = self.send_json(req).await?;
+        let fields = "user(emailAddress,displayName,photoLink),storageQuota";
+        let body: Resp = self
+            .send_authed_json(|tok| {
+                self.http
+                    .get(format!("{}/about", self.api_base))
+                    .bearer_auth(tok)
+                    .query(&[("fields", fields)])
+            })
+            .await?;
         Ok(About {
             email: body.user.email_address,
             display_name: body.user.display_name.unwrap_or_default(),
@@ -134,16 +152,22 @@ impl DriveClient {
             id: String,
             name: String,
         }
-        let mut req = self
-            .auth(self.http.get(format!("{}/drives", self.api_base)))
-            .query(&[
-                ("pageSize", "100"),
-                ("fields", "nextPageToken,drives(id,name)"),
-            ]);
-        if let Some(t) = page_token {
-            req = req.query(&[("pageToken", t)]);
-        }
-        let body: Resp = self.send_json(req).await?;
+        let body: Resp = self
+            .send_authed_json(|tok| {
+                let mut req = self
+                    .http
+                    .get(format!("{}/drives", self.api_base))
+                    .bearer_auth(tok)
+                    .query(&[
+                        ("pageSize", "100"),
+                        ("fields", "nextPageToken,drives(id,name)"),
+                    ]);
+                if let Some(t) = page_token {
+                    req = req.query(&[("pageToken", t)]);
+                }
+                req
+            })
+            .await?;
         Ok(SharedDriveList {
             drives: body
                 .drives
@@ -215,22 +239,28 @@ impl DriveClient {
             next_page_token: Option<String>,
         }
         let fields = format!("nextPageToken,files({FILE_FIELDS})");
-        let mut req = self
-            .auth(self.http.get(format!("{}/files", self.api_base)))
-            .query(&[("q", q), ("fields", fields.as_str()), ("pageSize", "100")]);
-        if let Some(ord) = order_by {
-            req = req.query(&[("orderBy", ord)]);
-        }
-        if supports_all_drives {
-            req = req.query(&[
-                ("supportsAllDrives", "true"),
-                ("includeItemsFromAllDrives", "true"),
-            ]);
-        }
-        if let Some(t) = page_token {
-            req = req.query(&[("pageToken", t)]);
-        }
-        let body: Resp = self.send_json(req).await?;
+        let body: Resp = self
+            .send_authed_json(|tok| {
+                let mut req = self
+                    .http
+                    .get(format!("{}/files", self.api_base))
+                    .bearer_auth(tok)
+                    .query(&[("q", q), ("fields", fields.as_str()), ("pageSize", "100")]);
+                if let Some(ord) = order_by {
+                    req = req.query(&[("orderBy", ord)]);
+                }
+                if supports_all_drives {
+                    req = req.query(&[
+                        ("supportsAllDrives", "true"),
+                        ("includeItemsFromAllDrives", "true"),
+                    ]);
+                }
+                if let Some(t) = page_token {
+                    req = req.query(&[("pageToken", t)]);
+                }
+                req
+            })
+            .await?;
         Ok(FileList {
             files: body
                 .files
@@ -240,42 +270,6 @@ impl DriveClient {
                 .collect(),
             next_page_token: body.next_page_token,
         })
-    }
-
-    pub async fn download_bytes(&self, url: &str) -> Result<Vec<u8>> {
-        let resp = self
-            .http
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| DriveError::Http(e.to_string()))?;
-        let resp = self.check(resp).await?;
-        resp.bytes()
-            .await
-            .map(|b| b.to_vec())
-            .map_err(|e| DriveError::Http(e.to_string()))
-    }
-
-    pub async fn download_range(&self, file_id: &str, offset: u64, len: u32) -> Result<Bytes> {
-        if len == 0 {
-            return Ok(Bytes::new());
-        }
-        let end = offset.saturating_add(len as u64).saturating_sub(1);
-        let resp = self
-            .auth(self.http.get(format!("{}/files/{file_id}", self.api_base)))
-            .query(&[("alt", "media")])
-            .header("Range", format!("bytes={offset}-{end}"))
-            .send()
-            .await
-            .map_err(|e| DriveError::Http(e.to_string()))?;
-        let status = resp.status().as_u16();
-        if status != 200 && status != 206 {
-            self.check(resp).await?;
-            return Ok(Bytes::new());
-        }
-        resp.bytes()
-            .await
-            .map_err(|e| DriveError::Http(e.to_string()))
     }
 
     pub fn native_doc_link(file_id: &str) -> String {

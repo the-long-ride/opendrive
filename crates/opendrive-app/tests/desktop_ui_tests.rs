@@ -175,31 +175,27 @@ fn control_center_actions_theme_toggle_and_errors_work() {
         );
     }
 
-    bridge
-        .controller_handle()
-        .lock()
-        .unwrap()
-        .settings
-        .virtual_drive_letter = "C".into();
-    bridge.update_virtual_drive(true).unwrap();
+    let mm = MountManager::new_null().with_mount_root(blocker.clone());
+    let vd_b = Bridge::new(Settings::default())
+        .0
+        .with_mount_manager(Arc::new(mm));
+    let mut vd_app = ControlCenterApp::new(vd_b.clone());
+    vd_b.update_virtual_drive(true).unwrap();
     let ctx = egui::Context::default();
-    bridge.spawn_mount_sync(Some(ctx.clone()));
+    vd_b.spawn_mount_sync(Some(ctx.clone()));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     while std::time::Instant::now() < deadline {
-        let mut out = ctx.run_ui(
-            RawInput {
-                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 760.0))),
-                ..Default::default()
-            },
-            |ui| app.render_root(ui),
-        );
+        let mut out = ctx.run_ui(RawInput::default(), |ui| vd_app.render_root(ui));
         out.textures_delta.clear();
-        if app.notice.as_ref().map(|n| n.tone) == Some(NoticeTone::Error) {
+        if vd_app.notice.as_ref().map(|n| n.tone) == Some(NoticeTone::Error) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    assert_eq!(app.notice.as_ref().map(|n| n.tone), Some(NoticeTone::Error));
+    assert_eq!(
+        vd_app.notice.as_ref().map(|n| n.tone),
+        Some(NoticeTone::Error)
+    );
 
     // Inline alias editing & encrypted vault backup actions.
     bridge

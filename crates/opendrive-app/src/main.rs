@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! OpenDrive desktop app and CLI entrypoint.
 
 use opendrive_app::runtime::{cli, ui};
@@ -12,10 +13,33 @@ use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
 
+#[cfg(windows)]
+fn attach_parent_console_if_needed(cmd: &str) {
+    if matches!(cmd, "" | "ui" | "tray" | "--mount-watchdog") {
+        return;
+    }
+    const STD_OUTPUT_HANDLE: u32 = (-11i32) as u32;
+    const ATTACH_PARENT_PROCESS: u32 = u32::MAX;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetStdHandle(n_std_handle: u32) -> isize;
+        fn GetFileType(h_file: isize) -> u32;
+        fn AttachConsole(dw_process_id: u32) -> i32;
+    }
+    unsafe {
+        let stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+        if stdout == 0 || stdout == -1 || GetFileType(stdout) == 0 {
+            let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
     let mut args = env::args().skip(1);
     let cmd = args.next().unwrap_or_default();
+    #[cfg(windows)]
+    attach_parent_console_if_needed(&cmd);
+    opendrive_app::runtime::app_logs::init_app_logging();
     match cmd.as_str() {
         "" | "ui" => ui::run_desktop_ui(ui::load_controller()),
         #[cfg(feature = "tray")]

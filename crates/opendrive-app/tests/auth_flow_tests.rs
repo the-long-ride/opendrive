@@ -84,10 +84,13 @@ async fn browser_oauth_pkce_end_to_end_connects_persists_and_cleans_up() {
     );
 
     let rehydrated = ControlCenterApp::new(bridge.clone());
-    assert_eq!(rehydrated.draft.client_id, "cid-e2e");
-    assert_eq!(rehydrated.draft.client_secret, "csec-e2e");
+    assert!(rehydrated.draft.client_id.is_empty());
+    assert!(rehydrated.draft.client_secret.is_empty());
 
     app.apply_action(UiAction::ToggleDrawer(Some(true)));
+    assert!(app.draft.client_id.is_empty() && app.draft.client_secret.is_empty());
+    app.draft.client_id = "cid-e2e".into();
+    app.draft.client_secret = "csec-e2e".into();
     app.draft.nickname = "Alt Nick".into();
     app.draft.folder_name = "alt-folder".into();
     app.apply_action(UiAction::StartBrowserOAuth {

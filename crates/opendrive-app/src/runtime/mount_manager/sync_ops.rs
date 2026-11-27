@@ -1,13 +1,12 @@
 //! Token refresh, single-account mount activation, virtual drive sync, and Bridge helpers.
 
+use super::token_refresh::{attach_account_refresher, fetch_fresh_access_token};
 use super::{MountManager, MountedAccount};
 use crate::runtime::auth_runner::{GOOGLE_DRIVE_API_BASE, GOOGLE_DRIVE_UPLOAD_BASE};
 use crate::runtime::bridge::Bridge;
 use crate::runtime::bridge_types::{str_err, AppStateResponse};
 use eframe::egui;
-use opendrive_auth::{
-    AuthClient, SecretStore, ServiceAccountKey, AUTH_URL, DEFAULT_TOKEN_URI, TOKEN_URL,
-};
+use opendrive_auth::SecretStore;
 use opendrive_core::{Account, AccountStatus, AppController, CredentialSet};
 use opendrive_drive::DriveClient;
 use opendrive_sync::{SyncEngine, VfsEngine};
@@ -61,7 +60,7 @@ impl MountManager {
                 .clone();
             (acct, g.accounts.list_credentials().to_vec())
         };
-        let refreshed = rt.block_on(self.refresh_drive_client(&acct, &creds, secrets))?;
+        let refreshed = rt.block_on(self.refresh_drive_client(&acct, &creds, ctrl, secrets))?;
         let drive = refreshed.ok_or_else(|| {
             format!(
                 "Missing saved credentials for {} — remove and reconnect account",
@@ -76,9 +75,9 @@ impl MountManager {
         &self,
         acct: &Account,
         creds: &[CredentialSet],
+        ctrl: &Arc<Mutex<AppController>>,
         secrets: &Arc<dyn SecretStore>,
     ) -> Result<Option<DriveClient>, String> {
-        let token_url = self.token_url_override.as_deref().unwrap_or(TOKEN_URL);
         let api_base = self
             .api_base_override
             .as_deref()
@@ -87,46 +86,18 @@ impl MountManager {
             .upload_base_override
             .as_deref()
             .unwrap_or(GOOGLE_DRIVE_UPLOAD_BASE);
-        let access = if let Some(rt_tok) = secrets
-            .load_refresh_token(acct.id)
-            .map_err(str_err)?
-            .filter(|s| !s.trim().is_empty())
-        {
-            let cred = creds
-                .iter()
-                .find(|c| c.id == acct.credential_set_id)
-                .ok_or_else(|| "missing OAuth credential set".to_string())?;
-            let client_secret = secrets
-                .load_client_secret(cred.id)
-                .map_err(str_err)?
-                .unwrap_or_default();
-            let auth = AuthClient::with_endpoints(
-                cred.client_id.clone(),
-                client_secret,
-                AUTH_URL,
-                token_url,
-            );
-            Some(auth.refresh(&rt_tok).await.map_err(str_err)?)
-        } else if let Some(sa_json) = secrets
-            .load_service_account_json(acct.id)
-            .map_err(str_err)?
-            .filter(|s| !s.trim().is_empty())
-        {
-            let mut key = ServiceAccountKey::from_json_str(&sa_json).map_err(str_err)?;
-            if let Some(url) = &self.token_url_override {
-                if key.token_uri == DEFAULT_TOKEN_URI {
-                    key.token_uri = url.clone();
-                }
-            }
-            Some(
-                key.fetch_access_token(acct.read_only)
-                    .await
-                    .map_err(str_err)?,
+        let access =
+            fetch_fresh_access_token(acct, creds, secrets, self.token_url_override.as_deref())
+                .await?;
+        Ok(access.map(|at| {
+            attach_account_refresher(
+                DriveClient::with_base_urls(at, api_base, upload_base),
+                acct.id,
+                ctrl,
+                secrets,
+                self.token_url_override.as_deref(),
             )
-        } else {
-            None
-        };
-        Ok(access.map(|at| DriveClient::with_base_urls(at, api_base, upload_base)))
+        }))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -147,7 +118,7 @@ impl MountManager {
             .map_err(str_err)?;
         let mut auth_issue: Option<String> = None;
         if engine.drive_client_for(acct.id).is_err() {
-            match rt.block_on(self.refresh_drive_client(&acct, creds, secrets)) {
+            match rt.block_on(self.refresh_drive_client(&acct, creds, ctrl, secrets)) {
                 Ok(Some(drive)) => engine.set_drive_client(acct.id, drive),
                 Ok(None) => {
                     auth_issue = Some(format!(
@@ -204,9 +175,9 @@ impl MountManager {
             Arc::clone(engine) as Arc<dyn VfsEngine>,
             rt.handle(),
         )?;
-        let pending_dirs = engine.placeholder_folder_rel_paths(root_node);
+        let entries = engine.local_reconcile_entries(root_node);
         self.backend
-            .reconcile_placeholders(&acct_path, &pending_dirs);
+            .reconcile_placeholder_entries(&acct_path, &entries);
         let poller = {
             let _g = rt.enter();
             engine.spawn_change_poller(acct.id, Duration::from_secs(30))

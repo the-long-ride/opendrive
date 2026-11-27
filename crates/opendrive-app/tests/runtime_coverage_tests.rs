@@ -42,6 +42,15 @@ impl MountBackend for FailThisPcBackend {
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
+    fn set_virtual_drive_with_quota(
+        &self,
+        _: bool,
+        _: &str,
+        _: &Path,
+        _: Option<ExplorerQuota>,
+    ) -> Result<Option<char>, String> {
+        Err("virtual drive blocked".into())
+    }
     fn sync_this_pc_namespace(
         &self,
         _: bool,
@@ -242,46 +251,45 @@ fn mount_manager_sync_ops_and_virtual_drive_error_paths() {
         .explorer_list(aid, None, true)
         .is_err());
     mm_err.sync_now(&ctrl, &engine2, &fail_sec).unwrap_err();
-    assert_eq!(
-        ctrl.lock()
-            .unwrap()
-            .accounts
-            .get_account(aid)
-            .unwrap()
-            .status,
-        AccountStatus::NeedsReauth
-    );
+    let status = ctrl
+        .lock()
+        .unwrap()
+        .accounts
+        .get_account(aid)
+        .unwrap()
+        .status
+        .clone();
+    assert_eq!(status, AccountStatus::NeedsReauth);
 
-    // Virtual drive same-letter enable failure & sync_this_pc_namespace error.
-    let mut s_c = Settings {
-        virtual_drive_enabled: false,
-        virtual_drive_letter: "C".into(),
+    // This PC namespace sync, LiveMountBackend guards, and error propagation.
+    let s_on = Settings {
+        virtual_drive_enabled: true,
+        virtual_drive_letter: "O".into(),
         ..Default::default()
     };
-    let vd_ctrl = Arc::new(Mutex::new(AppController::new(s_c.clone())));
+    let vd_ctrl = Arc::new(Mutex::new(AppController::new(s_on)));
     let vd_mm = MountManager::new(Arc::clone(&backend) as Arc<dyn MountBackend>)
         .with_mount_root(tmp.clone());
     vd_mm.sync_now(&vd_ctrl, &engine, &secrets).unwrap();
-    s_c.virtual_drive_enabled = true;
-    vd_ctrl.lock().unwrap().settings = s_c;
-    assert!(vd_mm
-        .sync_now(&vd_ctrl, &engine, &secrets)
-        .unwrap_err()
-        .contains("Virtual drive C"));
+    assert!(vd_mm.is_virtual_drive_active());
 
-    vd_ctrl.lock().unwrap().settings.virtual_drive_letter = "O".into();
     let fail_pc = FailThisPcBackend;
     assert!(fail_pc.set_virtual_drive(true, "invalid!", &tmp).is_err());
+    assert!(fail_pc
+        .set_virtual_drive_with_quota(true, "C", &tmp, None)
+        .is_err());
+    assert!(fail_pc.sync_this_pc_namespace(true, &tmp, None).is_err());
     let sub = tmp.join("dehyd_dir");
     LiveMountBackend.prepare_root(&sub).unwrap();
     std::fs::write(sub.join("f.txt"), b"x").unwrap();
     LiveMountBackend.reconcile_placeholders(&sub, &[]);
+    LiveMountBackend.reconcile_placeholder_entries(&sub, &[]);
     LiveMountBackend.dehydrate_path(&sub);
     let fail_pc_mm = MountManager::new(Arc::new(fail_pc)).with_mount_root(tmp.clone());
-    assert!(fail_pc_mm
+    let err_pc = fail_pc_mm
         .sync_now(&vd_ctrl, &engine, &secrets)
-        .unwrap_err()
-        .contains("This PC entry"));
+        .unwrap_err();
+    assert!(err_pc.contains("This PC entry"));
     mounts.shutdown_all();
     err_h.abort();
     tok_ok_h.abort();

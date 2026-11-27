@@ -23,7 +23,9 @@ impl ControlCenterApp {
                     let cache_on = self.state.settings.explorer_folder_cache;
                     let session = self.explorer.sessions.entry(account_id).or_default();
                     if session.breadcrumbs.is_empty() {
-                        session.breadcrumbs.push((folder_id, "My Drive".into()));
+                        session
+                            .breadcrumbs
+                            .push((folder_id, session.scope.label().into()));
                     }
                     session.record_folder_entries(folder_id, entries, cache_on, Some(epoch));
                 }
@@ -112,6 +114,8 @@ impl ControlCenterApp {
             }
             self.explorer.open = true;
             self.explorer.active_account_id = None;
+            self.drawer_open = false;
+            self.reauth_account_id = None;
             return;
         }
         let Ok(acct_id) = Uuid::parse_str(id_str.trim()) else {
@@ -124,6 +128,8 @@ impl ControlCenterApp {
         }
         self.explorer.open = true;
         self.explorer.active_account_id = Some(acct_id);
+        self.drawer_open = false;
+        self.reauth_account_id = None;
         if self
             .explorer
             .sessions
@@ -154,7 +160,12 @@ impl ControlCenterApp {
         let acct_id = self.explorer.active_account_id;
         match action {
             UiAction::OpenExplorer(id) | UiAction::ExplorerSelectAccount(id) => {
-                self.open_account_explorer(&id);
+                self.open_account_explorer(&id)
+            }
+            UiAction::ExplorerSwitchScope(scope) => {
+                if let Some(aid) = acct_id {
+                    self.switch_explorer_scope(aid, scope);
+                }
             }
             UiAction::CloseExplorer => self.explorer.open = false,
             UiAction::ExplorerSetViewMode(mode) => self.explorer.view_mode = mode,

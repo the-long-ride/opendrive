@@ -81,6 +81,29 @@ impl SyncEngine {
         }
         out
     }
+
+    pub fn local_reconcile_entries(&self, root_node: NodeId) -> Vec<(PathBuf, NodeId, bool)> {
+        let store = self.store.lock();
+        let mut out = Vec::new();
+        let mut queue = std::collections::VecDeque::from([(root_node as i64, PathBuf::new())]);
+        while let Some((pid, rel)) = queue.pop_front() {
+            let Ok(children) = store.list_children(pid) else {
+                continue;
+            };
+            for child in children {
+                if child.trashed {
+                    continue;
+                }
+                let child_rel = rel.join(child.effective_name());
+                let is_dir = child.is_folder();
+                out.push((child_rel.clone(), child.id as NodeId, is_dir));
+                if is_dir {
+                    queue.push_back((child.id, child_rel));
+                }
+            }
+        }
+        out
+    }
 }
 
 pub(crate) fn sanitize_name(name: &str) -> String {

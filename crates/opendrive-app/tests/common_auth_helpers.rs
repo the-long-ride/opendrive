@@ -8,6 +8,7 @@ use opendrive_app::runtime::mount_manager::MountBackend;
 use opendrive_auth::{AuthError, Result as AuthResult, SecretStore};
 use opendrive_core::Account;
 use opendrive_fake_drive::{FakeAbout, FakeDrive, FakeDriveServer};
+use opendrive_platform::ExplorerQuota;
 use opendrive_sync::VfsEngine;
 use std::any::Any;
 use std::io::{Read, Write};
@@ -21,21 +22,27 @@ use tokio::task::JoinHandle;
 use url::Url;
 use uuid::Uuid;
 
+fn push_rec<T>(m: &Mutex<Vec<T>>, v: T) {
+    m.lock().unwrap_or_else(|e| e.into_inner()).push(v);
+}
+
+pub type QuotaRecord = (bool, String, PathBuf, Option<ExplorerQuota>);
+
 #[derive(Default)]
 pub struct RecordingBackend {
     pub prepared: Mutex<Vec<PathBuf>>,
     pub connected: Mutex<Vec<(Uuid, PathBuf, u64)>>,
     pub unregistered: Mutex<Vec<PathBuf>>,
     pub virtual_drives: Mutex<Vec<(bool, String, PathBuf)>>,
-    pub this_pc_namespaces: Mutex<Vec<(bool, PathBuf, Option<opendrive_platform::ExplorerQuota>)>>,
+    pub virtual_drive_quotas: Mutex<Vec<QuotaRecord>>,
+    pub this_pc_namespaces: Mutex<Vec<(bool, PathBuf, Option<ExplorerQuota>)>>,
 }
 
 impl MountBackend for RecordingBackend {
     fn prepare_root(&self, path: &Path) -> Result<(), String> {
-        self.prepared.lock().unwrap().push(path.to_path_buf());
+        push_rec(&self.prepared, path.to_path_buf());
         Ok(())
     }
-
     fn connect_account(
         &self,
         acct: &Account,
@@ -44,37 +51,45 @@ impl MountBackend for RecordingBackend {
         _engine: Arc<dyn VfsEngine>,
         _rt: &tokio::runtime::Handle,
     ) -> Result<Box<dyn Any + Send + Sync>, String> {
-        self.connected
-            .lock()
-            .unwrap()
-            .push((acct.id, path.to_path_buf(), root_node));
+        push_rec(&self.connected, (acct.id, path.to_path_buf(), root_node));
         Ok(Box::new(()))
     }
-
     fn unregister_account(&self, path: &Path) {
-        self.unregistered.lock().unwrap().push(path.to_path_buf());
+        push_rec(&self.unregistered, path.to_path_buf());
     }
-
     fn set_virtual_drive(&self, enabled: bool, letter: &str, root: &Path) -> Result<(), String> {
-        self.virtual_drives
-            .lock()
-            .unwrap()
-            .push((enabled, letter.to_string(), root.to_path_buf()));
+        push_rec(
+            &self.virtual_drives,
+            (enabled, letter.to_string(), root.to_path_buf()),
+        );
         opendrive_platform::normalize_drive_letter(letter)
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
-
+    fn set_virtual_drive_with_quota(
+        &self,
+        enabled: bool,
+        letter: &str,
+        root: &Path,
+        quota: Option<ExplorerQuota>,
+    ) -> Result<Option<char>, String> {
+        push_rec(
+            &self.virtual_drive_quotas,
+            (enabled, letter.to_string(), root.to_path_buf(), quota),
+        );
+        self.set_virtual_drive(enabled, letter, root)?;
+        Ok(enabled.then(|| opendrive_platform::normalize_drive_letter(letter).unwrap()))
+    }
     fn sync_this_pc_namespace(
         &self,
         enabled: bool,
         root: &Path,
-        quota: Option<opendrive_platform::ExplorerQuota>,
+        quota: Option<ExplorerQuota>,
     ) -> Result<(), String> {
-        self.this_pc_namespaces
-            .lock()
-            .unwrap()
-            .push((enabled, root.to_path_buf(), quota));
+        push_rec(
+            &self.this_pc_namespaces,
+            (enabled, root.to_path_buf(), quota),
+        );
         Ok(())
     }
 }
