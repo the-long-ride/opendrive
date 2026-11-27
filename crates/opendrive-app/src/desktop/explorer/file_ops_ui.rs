@@ -9,8 +9,7 @@ use crate::desktop::UiAction;
 use crate::runtime::explorer_ops::ExplorerEntry;
 use eframe::egui::{self, FontId, Vec2};
 use opendrive_core::MediaKind;
-use opendrive_store::NodeState;
-use opendrive_sync::{NodeId, SHARED_WITH_ME_DRIVE_ID};
+use opendrive_sync::{ExplorerSyncStatus, NodeId, SHARED_WITH_ME_DRIVE_ID};
 use uuid::Uuid;
 
 pub(crate) fn is_mutable_entry(entry: &ExplorerEntry) -> bool {
@@ -19,36 +18,50 @@ pub(crate) fn is_mutable_entry(entry: &ExplorerEntry) -> bool {
 
 pub(super) fn render_sync_state_pill(ui: &mut egui::Ui, pal: &ThemePalette, entry: &ExplorerEntry) {
     let (bg, fg, border) = (pal.cloud_tint, pal.cloud_fg, pal.cloud_border);
-    let (icon, tip, c_bg, c_fg, c_bd) = match entry.state {
-        NodeState::Placeholder => (
+    let (icon, tip, c_bg, c_fg, c_bd) = match entry.sync_status {
+        ExplorerSyncStatus::Cloud => (
             IconKind::Cloud,
             "Cloud — Streamed on demand (not stored locally)",
             bg,
             fg,
             border,
         ),
-        NodeState::Cached => (
+        ExplorerSyncStatus::Indexed => (
+            IconKind::FolderIndexed,
+            "Indexed — Folder listing cached (files remain in cloud)",
+            pal.pill_neutral,
+            pal.text_muted,
+            pal.card_border,
+        ),
+        ExplorerSyncStatus::PartialLocal => (
+            IconKind::DownloadPartial,
+            "Partially Local — Some items inside are synced locally",
+            pal.accent_blue_tint,
+            pal.pop_cyan,
+            pal.pop_cyan,
+        ),
+        ExplorerSyncStatus::FullLocal => (
             IconKind::DownloadCheck,
-            "Local — Downloaded and available offline",
+            "Local — Fully downloaded and available offline",
             pal.ok_tint,
             pal.ok_fg,
             pal.ok_border,
         ),
-        NodeState::Dirty => (
+        ExplorerSyncStatus::PendingUpload => (
             IconKind::CloudUpload,
             "Pending Upload — Local changes waiting to sync",
             pal.warn_tint,
             pal.warn_fg,
             pal.warn_border,
         ),
-        NodeState::Conflict => (
+        ExplorerSyncStatus::Conflict => (
             IconKind::Alert,
             "Conflict — Both local and cloud versions changed",
             pal.accent_coral_tint,
             pal.accent_coral,
             pal.error_border,
         ),
-        NodeState::Hydrating => (
+        ExplorerSyncStatus::Syncing => (
             IconKind::Refresh,
             "Syncing — Downloading file from Google Drive",
             bg,

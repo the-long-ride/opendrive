@@ -2,16 +2,20 @@
 
 mod actions;
 mod auth_handlers;
+mod auth_reauth;
 pub mod bento;
+mod dispatch;
 pub mod drawer;
 pub mod explorer;
 mod explorer_actions;
+mod font_actions;
 pub mod ledger;
 pub mod modals;
 pub mod panels;
 mod release_actions;
 pub mod resize;
 mod settings_actions;
+pub mod terminal;
 pub mod titlebar;
 
 pub use self::actions::{NoticeTone, UiAction, UiNotice};
@@ -20,17 +24,23 @@ pub use self::explorer::{
     AccountExplorerSession, ExplorerClipboard, ExplorerModal, ExplorerSortColumn, ExplorerState,
     ExplorerViewMode,
 };
+pub use self::modals::font_ui::FontPickerDraft;
+pub use self::modals::guide::GuideUiState;
 pub use self::modals::open_rules_ui::OpenRuleDraft;
 use self::panels::{
     handle_keyboard_zoom, render_overlays, render_workspace_panel, tick_notice_timeout,
 };
 use self::resize::handle_frameless_resize;
+use self::terminal::render_terminal_panel;
+pub use self::terminal::{LogFilterLevel, TerminalTab, TerminalViewState};
 use self::titlebar::render_custom_titlebar;
 use crate::design::formatters::NewAccountDraft;
 use crate::design::theme::{palette, ThemeMode};
 use crate::runtime::auth_runner::{AuthEndpoints, AuthSession};
 use crate::runtime::bridge::{AppStateResponse, Bridge};
 use crate::runtime::bridge_types::{AliasEditDraft, VaultBackupDraft};
+use crate::runtime::font_import::FontImportHandle;
+use crate::runtime::fonts::DiscoveredFont;
 use crate::runtime::release_check::{ReleaseCheckHandle, ReleaseInfo};
 use crate::shell::tray::{TrayEventQueue, TraySummaryUpdater};
 use eframe::egui;
@@ -46,6 +56,10 @@ pub struct ControlCenterApp {
     pub drawer_open: bool,
     pub settings_open: bool,
     pub guide_open: bool,
+    pub terminal_open: bool,
+    pub support_open: bool,
+    pub guide_state: GuideUiState,
+    pub terminal: TerminalViewState,
     pub tray_active: bool,
     pub hidden_to_tray: bool,
     pub quit_requested: bool,
@@ -53,6 +67,11 @@ pub struct ControlCenterApp {
     pub alias_edit: Option<AliasEditDraft>,
     pub vault_draft: VaultBackupDraft,
     pub open_rule_draft: OpenRuleDraft,
+    pub available_fonts: Vec<DiscoveredFont>,
+    pub(crate) fonts_loaded: bool,
+    pub font_draft: FontPickerDraft,
+    pub(crate) font_import: Option<FontImportHandle>,
+    pub(crate) applied_font: Option<Option<String>>,
     pub form_error: Option<String>,
     pub notice: Option<UiNotice>,
     pub notice_expires_at: Option<std::time::Instant>,
@@ -86,7 +105,6 @@ impl ControlCenterApp {
         if !state.accounts.is_empty() || state.settings.virtual_drive_enabled {
             bridge.spawn_mount_sync(None);
         }
-        let (client_id, client_secret) = bridge.saved_oauth_credentials();
         let (explorer_tx, explorer_rx) = mpsc::channel();
         Self {
             bridge,
@@ -95,17 +113,22 @@ impl ControlCenterApp {
             drawer_open: false,
             settings_open: false,
             guide_open: false,
+            terminal_open: false,
+            support_open: false,
+            guide_state: GuideUiState::default(),
+            terminal: TerminalViewState::default(),
             tray_active: false,
             hidden_to_tray: false,
             quit_requested: false,
-            draft: NewAccountDraft {
-                client_id,
-                client_secret,
-                ..Default::default()
-            },
+            draft: NewAccountDraft::default(),
             alias_edit: None,
             vault_draft: VaultBackupDraft::default(),
             open_rule_draft: OpenRuleDraft::default(),
+            available_fonts: Vec::new(),
+            fonts_loaded: false,
+            font_draft: FontPickerDraft::default(),
+            font_import: None,
+            applied_font: None,
             form_error: None,
             notice: None,
             notice_expires_at: None,
@@ -142,98 +165,6 @@ impl ControlCenterApp {
         self
     }
 
-    pub fn apply_action(&mut self, action: UiAction) {
-        match action {
-            UiAction::ToggleDrawer(force) => self.toggle_drawer(force),
-            UiAction::ToggleSettings(force) => self.toggle_settings(force),
-            UiAction::ToggleGuide(force) => self.toggle_guide(force),
-            UiAction::OpenCloudConsole => self.open_cloud_console(),
-            UiAction::ToggleTheme => self.toggle_theme(),
-            UiAction::SetAuthMode(mode) => self.set_auth_mode(mode),
-            UiAction::ToggleSecretVisibility => self.draft.show_secret = !self.draft.show_secret,
-            UiAction::StartBrowserOAuth {
-                open_browser,
-                copy_link,
-            } => self.start_browser_oauth_flow(open_browser, copy_link),
-            UiAction::CopyAuthLink => self.copy_auth_link(),
-            UiAction::OpenAuthBrowser => self.open_auth_browser(),
-            UiAction::StartServiceAccount => self.start_service_account_flow(),
-            UiAction::ReauthAccount {
-                id,
-                open_browser,
-                copy_link,
-            } => self.start_account_reauth(&id, open_browser, copy_link),
-            UiAction::CancelAuth => self.cancel_auth(),
-            UiAction::AccountAction { action, id } => {
-                self.run_account_action(action, id.as_deref())
-            }
-            UiAction::StartEditAlias(id) => self.start_edit_alias(&id),
-            UiAction::SaveAlias => self.save_edit_alias(),
-            UiAction::CancelAlias => self.alias_edit = None,
-            UiAction::ToggleVaultSecret => {
-                self.vault_draft.show_password = !self.vault_draft.show_password
-            }
-            UiAction::ExportVault => self.export_vault_flow(),
-            UiAction::ImportVault => self.import_vault_flow(),
-            UiAction::OpenVaultBackup => self.open_vault_backup(),
-            UiAction::SetBandwidth(limit) => self.set_bandwidth(limit),
-            UiAction::SetCacheMax(max_bytes) => self.set_cache_max(max_bytes),
-            UiAction::SetDocsMode(mode) => self.set_docs_mode(mode),
-            UiAction::ToggleAutostart => self.toggle_autostart(),
-            UiAction::ToggleVirtualDrive => self.toggle_virtual_drive(),
-            UiAction::ToggleCheckUpdates => self.toggle_check_updates(),
-            UiAction::ToggleExplorerFolderCache => self.toggle_explorer_folder_cache(),
-            UiAction::CheckReleasesNow => self.start_release_check(true),
-            UiAction::OpenReleasePage(url) => self.open_release_page(&url),
-            UiAction::IgnoreReleaseVersion(tag) => self.ignore_release_version(&tag),
-            UiAction::DismissReleaseDialog => self.available_release = None,
-            UiAction::OpenExternalUrl(url) => self.open_external_url(url),
-            UiAction::OpenMountRoot => self.open_mount_root(),
-            UiAction::OpenAccountFolder(path) => self.open_account_folder(&path),
-            UiAction::PurgeCache => self.purge_cache(),
-            UiAction::Refresh => self.refresh(),
-            UiAction::DismissNotice => self.dismiss_notice(),
-            exp @ (UiAction::OpenExplorer(_)
-            | UiAction::CloseExplorer
-            | UiAction::ExplorerSelectAccount(_)
-            | UiAction::ExplorerNavigateNode(_)
-            | UiAction::ExplorerNavigateBreadcrumb(_)
-            | UiAction::ExplorerRefresh
-            | UiAction::ExplorerSelectEntry(_)
-            | UiAction::ExplorerToggleSelect(_)
-            | UiAction::ExplorerSelectRange { .. }
-            | UiAction::ExplorerSelectAll
-            | UiAction::ExplorerSetViewMode(_)
-            | UiAction::ExplorerToggleSort(_)
-            | UiAction::ExplorerSyncDown(_)
-            | UiAction::ExplorerSyncUpItems(_)
-            | UiAction::ExplorerSyncUpFiles
-            | UiAction::ExplorerSyncUpFolder
-            | UiAction::ExplorerSyncUpAndClear(_)
-            | UiAction::ExplorerOpenItem(_)
-            | UiAction::ExplorerCopyStreamUrl(_)
-            | UiAction::ExplorerStartRename(_)
-            | UiAction::ExplorerSaveRename
-            | UiAction::ExplorerRequestDelete(_)
-            | UiAction::ExplorerConfirmDelete
-            | UiAction::ExplorerDismissModal
-            | UiAction::ExplorerSetClipboard { .. }
-            | UiAction::ExplorerClearClipboard
-            | UiAction::ExplorerPasteClipboard(_)) => self.handle_explorer_action(exp),
-            rule @ (UiAction::StartAddOpenWithRule
-            | UiAction::StartEditOpenWithRule(_)
-            | UiAction::SaveOpenWithRule
-            | UiAction::CancelOpenWithRuleEdit
-            | UiAction::RemoveOpenWithRule(_)
-            | UiAction::BrowseOpenWithRuleApp) => self.handle_open_rule_action(rule),
-            win @ (UiAction::WindowMinimize
-            | UiAction::WindowToggleMaximize
-            | UiAction::WindowRequestClose
-            | UiAction::WindowShowFromTray
-            | UiAction::WindowForceQuit) => self.handle_window_action(win),
-        }
-    }
-
     pub fn render_root(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.repaint_ctx = Some(ctx.clone());
@@ -245,6 +176,7 @@ impl ControlCenterApp {
         self.poll_explorer_jobs();
         self.maybe_check_releases_on_startup();
         self.poll_release_check();
+        self.poll_font_import();
         self.poll_bridge_and_avatars(&ctx);
 
         let mut actions = Vec::new();
@@ -252,8 +184,18 @@ impl ControlCenterApp {
         self.sync_tray_summary();
         tick_notice_timeout(&mut self.notice, &mut self.notice_expires_at, &ctx);
         let pal = palette(self.theme_mode);
-        let top_y = render_custom_titlebar(ui, &pal, self.theme_mode, &self.state, &mut actions);
-        if self.explorer.open {
+        let top_y = render_custom_titlebar(
+            ui,
+            &pal,
+            self.theme_mode,
+            &self.state,
+            self.terminal_open,
+            self.support_open,
+            &mut actions,
+        );
+        if self.terminal_open {
+            render_terminal_panel(ui, &pal, self, &mut actions);
+        } else if self.explorer.open {
             self::explorer::render_explorer_panel(ui, &pal, self, &mut actions);
         } else {
             render_workspace_panel(ui, &pal, self, &mut actions);
@@ -269,9 +211,12 @@ impl ControlCenterApp {
         }
         if self.auth_session.is_some()
             || self.release_checking
+            || self.font_draft.importing
             || !self.explorer.busy_accounts.is_empty()
         {
             ctx.request_repaint_after(Duration::from_millis(100));
+        } else if self.terminal_open {
+            ctx.request_repaint_after(Duration::from_millis(500));
         }
     }
 }

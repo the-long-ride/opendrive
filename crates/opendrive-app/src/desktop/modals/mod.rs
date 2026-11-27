@@ -1,17 +1,123 @@
 //! Centered desktop modals: Settings, Open With Rules, Setup Guide, and Release dialog.
 
+pub mod font_ui;
 pub mod guide;
 mod guide_content;
+mod guide_visuals;
 mod open_rules_actions;
 pub mod open_rules_ui;
 pub mod release;
 pub mod settings;
+pub mod support;
 
+use crate::design::formatters::{
+    bandwidth_to_step, cache_to_step, compute_cache_ratio, format_bandwidth, format_bytes,
+    step_to_bandwidth, step_to_cache, BANDWIDTH_STEPS, CACHE_STEPS_BYTES,
+};
 use crate::design::theme::ThemePalette;
+use crate::design::tooltip::attach_smart_tooltip;
 use crate::design::widgets::{pill_button, singleline_input, ButtonVariant, IconKind};
+use crate::design::widgets_controls::tactile_step_slider;
 use crate::desktop::UiAction;
+use crate::runtime::bridge::AppStateResponse;
 use crate::runtime::bridge_types::VaultBackupDraft;
-use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
+use eframe::egui::{
+    self, Align, CornerRadius, CursorIcon, Frame, Layout, Margin, RichText, Sense, Stroke,
+};
+
+const CHANGELOG_URL: &str = "https://github.com/the-long-ride/opendrive/blob/main/CHANGELOG.md";
+const AUTHOR_URL: &str = "https://the-long-ride.github.io/";
+
+pub(super) fn render_version_changelog_link(
+    ui: &mut egui::Ui,
+    pal: &ThemePalette,
+    actions: &mut Vec<UiAction>,
+) {
+    let ver_label = concat!("v", env!("CARGO_PKG_VERSION"));
+    let resp = ui
+        .add(
+            egui::Label::new(RichText::new(ver_label).size(12.5).color(pal.text_muted))
+                .sense(Sense::click()),
+        )
+        .on_hover_cursor(CursorIcon::PointingHand);
+    if resp.hovered() {
+        ui.painter().line_segment(
+            [
+                egui::Pos2::new(resp.rect.left(), resp.rect.bottom() - 1.0),
+                egui::Pos2::new(resp.rect.right(), resp.rect.bottom() - 1.0),
+            ],
+            Stroke::new(1.0, pal.text_muted),
+        );
+    }
+    attach_smart_tooltip(&resp, ui, pal, "Open Changelog on GitHub");
+    if resp.clicked() {
+        actions.push(UiAction::OpenExternalUrl(CHANGELOG_URL));
+    }
+}
+
+pub(super) fn render_bandwidth_and_cache(
+    ui: &mut egui::Ui,
+    pal: &ThemePalette,
+    state: &AppStateResponse,
+    actions: &mut Vec<UiAction>,
+) {
+    let settings = &state.settings;
+    let bw_step = bandwidth_to_step(settings.bandwidth_limit);
+    let bw_lbl = format_bandwidth(settings.bandwidth_limit);
+    let cache_pct = compute_cache_ratio(state.stats.cache_bytes, settings.cache_max_size);
+    let cache_readout = format!(
+        "{} / {} ({cache_pct}%)",
+        format_bytes(state.stats.cache_bytes),
+        format_bytes(settings.cache_max_size),
+    );
+    let cache_step = cache_to_step(settings.cache_max_size);
+    let mut next_bw = None;
+    let mut next_cache = None;
+    if ui.available_width() >= 420.0 {
+        ui.columns(2, |cols| {
+            next_bw = tactile_step_slider(
+                &mut cols[0],
+                pal,
+                bw_step,
+                BANDWIDTH_STEPS.len(),
+                "Bandwidth",
+                &bw_lbl,
+            );
+            next_cache = tactile_step_slider(
+                &mut cols[1],
+                pal,
+                cache_step,
+                CACHE_STEPS_BYTES.len(),
+                "Cache Limit",
+                &cache_readout,
+            );
+        });
+    } else {
+        next_bw = tactile_step_slider(
+            ui,
+            pal,
+            bw_step,
+            BANDWIDTH_STEPS.len(),
+            "Bandwidth",
+            &bw_lbl,
+        );
+        ui.add_space(10.0);
+        next_cache = tactile_step_slider(
+            ui,
+            pal,
+            cache_step,
+            CACHE_STEPS_BYTES.len(),
+            "Cache Limit",
+            &cache_readout,
+        );
+    }
+    if let Some(next_step) = next_bw {
+        actions.push(UiAction::SetBandwidth(step_to_bandwidth(next_step)));
+    }
+    if let Some(next_step) = next_cache {
+        actions.push(UiAction::SetCacheMax(step_to_cache(next_step)));
+    }
+}
 
 pub(super) fn render_vault_backup_section(
     ui: &mut egui::Ui,
@@ -108,12 +214,43 @@ pub(super) fn render_about_footer(
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new("Author: the-long-ride")
-                        .size(13.0)
-                        .strong()
-                        .color(pal.text_primary),
-                );
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(
+                        RichText::new("Author:")
+                            .size(13.0)
+                            .strong()
+                            .color(pal.text_primary),
+                    );
+                    let author_resp = ui
+                        .add(
+                            egui::Label::new(
+                                RichText::new("the-long-ride")
+                                    .size(13.0)
+                                    .strong()
+                                    .color(pal.text_primary),
+                            )
+                            .sense(Sense::click()),
+                        )
+                        .on_hover_cursor(CursorIcon::PointingHand);
+                    ui.painter().line_segment(
+                        [
+                            egui::Pos2::new(
+                                author_resp.rect.left(),
+                                author_resp.rect.bottom() - 1.0,
+                            ),
+                            egui::Pos2::new(
+                                author_resp.rect.right(),
+                                author_resp.rect.bottom() - 1.0,
+                            ),
+                        ],
+                        Stroke::new(1.0, pal.text_primary),
+                    );
+                    attach_smart_tooltip(&author_resp, ui, pal, AUTHOR_URL);
+                    if author_resp.clicked() {
+                        actions.push(UiAction::OpenExternalUrl(AUTHOR_URL));
+                    }
+                });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if pill_button(
                         ui,

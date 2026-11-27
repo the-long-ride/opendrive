@@ -1,6 +1,7 @@
 //! Action enum and status/error notice types for the Control Center desktop UI.
 
-use super::explorer::{ExplorerSortColumn, ExplorerViewMode};
+use super::explorer::{ExplorerScope, ExplorerSortColumn, ExplorerViewMode};
+use super::terminal::TerminalTab;
 use crate::design::formatters::ConnectAuthMode;
 use opendrive_core::DocsMode;
 use opendrive_sync::NodeId;
@@ -22,6 +23,12 @@ pub enum UiAction {
     ToggleDrawer(Option<bool>),
     ToggleSettings(Option<bool>),
     ToggleGuide(Option<bool>),
+    ToggleTerminal(Option<bool>),
+    SetTerminalTab(TerminalTab),
+    CopyLogs,
+    ClearLogs,
+    ToggleSupportModal(Option<bool>),
+    CopySupportPrompt,
     OpenCloudConsole,
     ToggleTheme,
     SetAuthMode(ConnectAuthMode),
@@ -38,6 +45,7 @@ pub enum UiAction {
         open_browser: bool,
         copy_link: bool,
     },
+    OpenReauthCredentials(String),
     CancelAuth,
     AccountAction {
         action: &'static str,
@@ -62,6 +70,10 @@ pub enum UiAction {
     IgnoreReleaseVersion(String),
     DismissReleaseDialog,
     OpenExternalUrl(&'static str),
+    SelectUiFont(String),
+    ResetUiFont,
+    ImportUiFont,
+    BrowseUiFont,
     OpenMountRoot,
     OpenAccountFolder(String),
     PurgeCache,
@@ -70,6 +82,7 @@ pub enum UiAction {
     OpenExplorer(String),
     CloseExplorer,
     ExplorerSelectAccount(String),
+    ExplorerSwitchScope(ExplorerScope),
     ExplorerNavigateNode(NodeId),
     ExplorerNavigateBreadcrumb(usize),
     ExplorerRefresh,

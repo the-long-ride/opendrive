@@ -105,23 +105,53 @@ pub fn logo_icon_data(size: u32) -> IconData {
     }
 }
 
-pub fn ensure_logo_ico(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+pub fn encode_logo_png(size: u32) -> Option<Vec<u8>> {
     use image::{ImageFormat, RgbaImage};
     use std::io::Cursor;
 
-    std::fs::create_dir_all(dir).ok()?;
-    let path = dir.join("opendrive.ico");
-    let img = RgbaImage::from_raw(64, 64, render_logo_rgba(64))?;
+    let side = size.max(16);
+    let img = RgbaImage::from_raw(side, side, render_logo_rgba(side))?;
     let mut png = Vec::new();
     img.write_to(&mut Cursor::new(&mut png), ImageFormat::Png)
         .ok()?;
-    let len = u32::try_from(png.len()).ok()?.to_le_bytes();
-    let mut ico = Vec::with_capacity(22 + png.len());
-    ico.extend_from_slice(&[0, 0, 1, 0, 1, 0]);
-    ico.extend_from_slice(&[64, 64, 0, 0, 1, 0, 32, 0]);
-    ico.extend_from_slice(&len);
-    ico.extend_from_slice(&22u32.to_le_bytes());
-    ico.extend_from_slice(&png);
+    Some(png)
+}
+
+pub fn encode_multi_size_ico(sizes: &[u32]) -> Option<Vec<u8>> {
+    let count = u16::try_from(sizes.len()).ok()?;
+    let mut payloads = Vec::with_capacity(sizes.len());
+    for &size in sizes {
+        let side = size.clamp(16, 256);
+        payloads.push((side, encode_logo_png(side)?));
+    }
+    let header_len = 6usize + payloads.len() * 16;
+    let total_png: usize = payloads.iter().map(|(_, p)| p.len()).sum();
+    let mut ico = Vec::with_capacity(header_len + total_png);
+    ico.extend_from_slice(&[0, 0, 1, 0]);
+    ico.extend_from_slice(&count.to_le_bytes());
+
+    let mut offset = header_len;
+    for (side, png) in &payloads {
+        let dim = if *side >= 256 { 0u8 } else { *side as u8 };
+        let size_u32 = u32::try_from(png.len()).ok()?;
+        let off_u32 = u32::try_from(offset).ok()?;
+        ico.extend_from_slice(&[dim, dim, 0, 0]);
+        ico.extend_from_slice(&1u16.to_le_bytes());
+        ico.extend_from_slice(&32u16.to_le_bytes());
+        ico.extend_from_slice(&size_u32.to_le_bytes());
+        ico.extend_from_slice(&off_u32.to_le_bytes());
+        offset += png.len();
+    }
+    for (_, png) in &payloads {
+        ico.extend_from_slice(png);
+    }
+    Some(ico)
+}
+
+pub fn ensure_logo_ico(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    std::fs::create_dir_all(dir).ok()?;
+    let path = dir.join("opendrive.ico");
+    let ico = encode_multi_size_ico(&[64])?;
     std::fs::write(&path, ico).ok()?;
     Some(path)
 }

@@ -50,8 +50,11 @@ async fn explorer_multi_selection_shortcuts_and_batch_ops_work() {
     app.apply_action(UiAction::OpenExplorer(a_id.to_string()));
     wait_entry(&ctx, &mut app, a_id, "gamma.txt");
 
-    let (swm_id, t_id, a_nid, b_nid, d_nid, g_nid) = (
-        eid(&app, a_id, "Shared with me"),
+    assert!(app.explorer.sessions[&a_id]
+        .entries
+        .iter()
+        .all(|e| e.name != "Shared with me"));
+    let (t_id, a_nid, b_nid, d_nid, g_nid) = (
         eid(&app, a_id, "Target"),
         eid(&app, a_id, "alpha.txt"),
         eid(&app, a_id, "beta.txt"),
@@ -120,9 +123,9 @@ async fn explorer_multi_selection_shortcuts_and_batch_ops_work() {
         .search_query
         .clear();
 
-    app.explorer.active_session_mut().unwrap().selected_ids = vec![swm_id, a_nid];
-    let swm_bar = texts(&ctx, &mut app);
-    assert!(has(&swm_bar, "2 selected") && !has(&swm_bar, "Rename"));
+    app.explorer.active_session_mut().unwrap().selected_ids = vec![t_id, a_nid];
+    let multi_bar = texts(&ctx, &mut app);
+    assert!(has(&multi_bar, "2 selected") && !has(&multi_bar, "Rename"));
     tap_key(&ctx, &mut app, Key::F2, none);
     assert!(app.explorer.modal.is_none());
 

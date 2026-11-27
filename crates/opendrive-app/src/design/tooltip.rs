@@ -129,6 +129,8 @@ fn known_button_description(
             Some(IconKind::Pause) => Some("Pause syncing across all accounts"),
             Some(IconKind::Play) => Some("Resume syncing across all accounts"),
             Some(IconKind::Settings) => Some(OPEN_SETTINGS_TIP),
+            Some(IconKind::Terminal) => Some("Toggle Terminal & App Logs view"),
+            Some(IconKind::HelpBook) => Some("Open AI Support Prompt & Help guide"),
             Some(IconKind::Grid) => Some("Switch to grid view"),
             Some(IconKind::List) => Some("Switch to list view"),
             Some(IconKind::ArrowLeft) => Some("Go back"),
@@ -150,6 +152,7 @@ fn known_button_description(
         "Alias" => Some("Edit display alias for this account"),
         "Remove" => Some("Disconnect this account from OpenDrive"),
         "Sign In" => Some("Complete Google sign-in for this account"),
+        "Credentials" => Some("Update OAuth Client ID, Client Secret, or Service Account JSON"),
         "Read-Write" => Some("Account allows uploads and edits (click for Read-Only)"),
         "Read-Only" => Some("Account is read-only (click to allow uploads and edits)"),
         "Save" => Some("Save changes"),
@@ -161,9 +164,7 @@ fn known_button_description(
         "Import Backup" => Some("Import accounts from an encrypted backup vault"),
         "Setup Guide" => Some("View Google OAuth and Service Account setup steps"),
         "Browser Sign-In" => Some("Authenticate via Google OAuth in your browser"),
-        "Service Account JSON (No Login)" => {
-            Some("Authenticate using a Google Service Account key file")
-        }
+        "Service Account JSON (No Login)" => Some("Authenticate using a Google Service Account"),
         "Show" => Some("Reveal hidden value"),
         "Hide" => Some("Hide sensitive value"),
         "Copy Link" => Some("Copy sign-in link to clipboard"),
@@ -171,6 +172,8 @@ fn known_button_description(
         "Cancel Sign-In" => Some("Cancel the active browser sign-in session"),
         "Sign in with Google" => Some("Start browser sign-in for Google Drive"),
         "Connect Service Account" => Some("Connect account using Service Account JSON"),
+        "Reset Font" => Some("Restore the default OpenDrive UI font"),
+        "Import" => Some("Validate and import custom font family or file"),
         "Export Backup" => Some("Export connected accounts to an encrypted vault"),
         "Browse" => Some("Browse for a folder or file on disk"),
         "Add" => Some("Add this rule to the list"),

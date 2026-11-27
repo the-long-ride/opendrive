@@ -2,11 +2,12 @@ use super::ControlCenterApp;
 use crate::design::formatters::{
     validate_browser_oauth_draft, validate_service_account_draft, ConnectAuthMode, NewAccountDraft,
 };
+use crate::runtime::app_logs::app_log_hub;
 use crate::runtime::auth_runner::{
     start_browser_oauth, start_service_account_auth, AuthEvent, AuthSession, OAuthStartParams,
     ServiceAccountParams,
 };
-use opendrive_core::Account;
+use opendrive_core::{Account, LogSeverity};
 use uuid::Uuid;
 
 impl ControlCenterApp {
@@ -39,12 +40,13 @@ impl ControlCenterApp {
                     self.reauth_account_id = None;
                     self.drawer_open = false;
                     self.form_error = None;
-                    let (client_id, client_secret) = self.bridge.saved_oauth_credentials();
-                    self.draft = NewAccountDraft {
-                        client_id,
-                        client_secret,
-                        ..Default::default()
-                    };
+                    self.draft = NewAccountDraft::default();
+                    app_log_hub().record_event(
+                        LogSeverity::Info,
+                        "opendrive::auth",
+                        None,
+                        &message,
+                    );
                     self.set_ok(message);
                     self.bridge.spawn_mount_sync(self.repaint_ctx.clone());
                 }
@@ -59,26 +61,32 @@ impl ControlCenterApp {
                         self.reauth_account_id = None;
                     }
                     self.form_error = Some(err.clone());
-                    self.set_err(format!("Sign-in failed: {err}"));
+                    let code = if opendrive_auth::is_credential_rejection_error(&err) {
+                        "OD-AUTH-001"
+                    } else if err.to_ascii_lowercase().contains("service account") {
+                        "OD-AUTH-004"
+                    } else {
+                        "OD-AUTH-002"
+                    };
+                    app_log_hub().record_event(
+                        LogSeverity::Error,
+                        "opendrive::auth",
+                        Some(code),
+                        &err,
+                    );
+                    self.set_err_without_log(format!("Sign-in failed: {err}"));
                     if let Some(acct_id) = target.filter(|_| !self.drawer_open) {
                         let is_sa = self
                             .find_account(acct_id)
                             .is_some_and(|a| a.credential_set_id.is_nil());
-                        if is_sa {
-                            self.open_reauth_drawer(
-                                acct_id,
-                                Some(format!(
-                                    "Service Account sign-in failed ({err}). Select or paste a valid JSON key below."
-                                )),
-                            );
+                        let prompt = if is_sa {
+                            format!("Service Account sign-in failed ({err}). Select or paste a valid JSON key below.")
                         } else if opendrive_auth::is_credential_rejection_error(&err) {
-                            self.open_reauth_drawer(
-                                acct_id,
-                                Some(format!(
-                                    "Google rejected your OAuth credentials ({err}). Check Client ID and Client Secret below."
-                                )),
-                            );
-                        }
+                            format!("Google rejected your OAuth credentials ({err}). Enter a valid Client ID and Client Secret below.")
+                        } else {
+                            format!("Authentication failed ({err}). Sign in again or update your Client ID and Client Secret below.")
+                        };
+                        self.open_reauth_drawer(acct_id, Some(prompt));
                     }
                 }
             }
@@ -103,7 +111,7 @@ impl ControlCenterApp {
         }
     }
 
-    fn launch_oauth(
+    pub(super) fn launch_oauth(
         &mut self,
         target_account_id: Option<Uuid>,
         (client_id, client_secret): (String, String),
@@ -171,7 +179,7 @@ impl ControlCenterApp {
         }
     }
 
-    fn find_account(&self, acct_id: Uuid) -> Option<Account> {
+    pub(super) fn find_account(&self, acct_id: Uuid) -> Option<Account> {
         self.state
             .accounts
             .iter()
@@ -179,7 +187,7 @@ impl ControlCenterApp {
             .cloned()
     }
 
-    fn launch_service_account(
+    pub(super) fn launch_service_account(
         &mut self,
         target_account_id: Option<Uuid>,
         json_or_path: String,
@@ -213,77 +221,6 @@ impl ControlCenterApp {
             d.read_only,
         );
         self.launch_service_account(self.reauth_account_id, d.service_account_input.clone(), m);
-    }
-
-    fn open_reauth_drawer(&mut self, acct_id: Uuid, custom_error: Option<String>) {
-        let Some(acct) = self.find_account(acct_id) else {
-            return;
-        };
-        let is_sa = acct.credential_set_id.is_nil();
-        self.cancel_active_auth();
-        self.reauth_account_id = Some(acct_id);
-        self.drawer_open = true;
-        let mut draft = NewAccountDraft {
-            nickname: acct.nickname,
-            folder_name: acct.folder_name,
-            read_only: acct.read_only,
-            ..Default::default()
-        };
-        let default_err = if is_sa {
-            draft.auth_mode = ConnectAuthMode::ServiceAccount;
-            draft.service_account_input = self
-                .bridge
-                .load_service_account_json(acct_id)
-                .unwrap_or_default();
-            "Select or paste your Service Account JSON key to re-authenticate."
-        } else {
-            let (cid, sec) = self.bridge.credentials_for_account(Some(acct_id));
-            (draft.auth_mode, draft.client_id, draft.client_secret) =
-                (ConnectAuthMode::BrowserOAuth, cid, sec);
-            match (
-                draft.client_id.trim().is_empty(),
-                draft.client_secret.trim().is_empty(),
-            ) {
-                (false, true) => {
-                    "Enter your OAuth Client Secret to re-authenticate (it will be saved in your OS keyring)."
-                }
-                (true, false) => "Enter your OAuth Client ID to re-authenticate.",
-                _ => "Enter your OAuth Client ID and Client Secret to re-authenticate.",
-            }
-        };
-        self.draft = draft;
-        self.form_error = custom_error.or_else(|| Some(default_err.into()));
-    }
-
-    pub(super) fn start_account_reauth(&mut self, id: &str, open_browser: bool, copy_link: bool) {
-        let Some(acct) = Uuid::parse_str(id)
-            .ok()
-            .and_then(|aid| self.find_account(aid))
-        else {
-            return;
-        };
-        let meta = (acct.nickname, acct.folder_name, acct.read_only);
-        if acct.credential_set_id.is_nil() {
-            if let Some(json) = self.bridge.load_service_account_json(acct.id) {
-                self.reauth_account_id = Some(acct.id);
-                self.launch_service_account(Some(acct.id), json, meta);
-            } else {
-                self.open_reauth_drawer(acct.id, None);
-            }
-            return;
-        }
-        let (client_id, client_secret) = self.bridge.credentials_for_account(Some(acct.id));
-        if !client_id.trim().is_empty() && !client_secret.trim().is_empty() {
-            self.reauth_account_id = Some(acct.id);
-            self.launch_oauth(
-                Some(acct.id),
-                (client_id, client_secret),
-                meta,
-                (open_browser, copy_link),
-            );
-        } else {
-            self.open_reauth_drawer(acct.id, None);
-        }
     }
 
     pub(super) fn cancel_auth(&mut self) {

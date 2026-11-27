@@ -153,7 +153,7 @@ fn settings_release_ledger_drawer_and_explorer_button_clicks() {
     let _ = support::wait_until(&ctx, &mut app, |x| !x.explorer.is_busy(aid1));
     app.apply_action(UiAction::ExplorerSetViewMode(ExplorerViewMode::Grid));
     assert!(click_if(&ctx, &mut app, "New Account"));
-    assert!(!app.explorer.open && app.drawer_open);
+    assert!(app.explorer.open && app.drawer_open);
 
     drive_h.abort();
 }

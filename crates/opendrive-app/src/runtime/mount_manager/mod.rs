@@ -3,7 +3,9 @@
 mod backend;
 pub mod live;
 mod sync_ops;
+pub(crate) mod token_refresh;
 mod virtual_drive;
+mod watchdog;
 
 pub use backend::{MountBackend, NullMountBackend};
 pub use live::{cleanup_os_mounts, cleanup_os_mounts_for_pid, spawn_mount_watchdog};
@@ -34,6 +36,13 @@ impl Drop for MountedAccount {
     }
 }
 
+pub(super) type VirtualDriveState = (
+    bool,
+    String,
+    String,
+    Option<opendrive_platform::ExplorerQuota>,
+);
+
 pub struct MountManager {
     backend: Arc<dyn MountBackend>,
     mount_root_override: Option<PathBuf>,
@@ -43,8 +52,7 @@ pub struct MountManager {
     runtime: Mutex<Option<Arc<tokio::runtime::Runtime>>>,
     worker_started: Mutex<bool>,
     pub(super) mounted: Mutex<HashMap<Uuid, MountedAccount>>,
-    pub(super) last_virtual_drive:
-        Mutex<Option<(bool, String, Option<opendrive_platform::ExplorerQuota>)>>,
+    pub(super) last_virtual_drive: Mutex<Option<VirtualDriveState>>,
     sync_mutex: Mutex<()>,
     pub(super) pending_notice: Mutex<Option<(bool, String)>>,
     pub(super) needs_refresh: AtomicBool,
@@ -99,6 +107,10 @@ impl MountManager {
         self
     }
 
+    pub(crate) fn token_url_override(&self) -> Option<&str> {
+        self.token_url_override.as_deref()
+    }
+
     pub fn mount_root(&self) -> Result<PathBuf, String> {
         match &self.mount_root_override {
             Some(path) => Ok(path.clone()),
@@ -120,7 +132,7 @@ impl MountManager {
             .lock()
             .expect("virtual drive lock")
             .as_ref()
-            .is_some_and(|(on, _, _)| *on)
+            .is_some_and(|(on, ..)| *on)
     }
 
     pub fn is_account_mounted(&self, account_id: Uuid) -> bool {
@@ -138,9 +150,13 @@ impl MountManager {
             .map(|m| m.path.clone())
     }
 
-    pub(crate) fn reconcile_account_placeholders(&self, account_id: Uuid, rel_dirs: &[PathBuf]) {
+    pub(crate) fn reconcile_account_entries(
+        &self,
+        account_id: Uuid,
+        entries: &[(PathBuf, u64, bool)],
+    ) {
         if let Some(path) = self.mounted_account_path(account_id) {
-            self.backend.reconcile_placeholders(&path, rel_dirs);
+            self.backend.reconcile_placeholder_entries(&path, entries);
         }
     }
 
@@ -246,11 +262,13 @@ impl MountManager {
             self.backend.unregister_all_accounts();
         }
         if let Ok(mut vd) = self.last_virtual_drive.lock() {
-            if let Some((_, letter, _)) = vd.take() {
+            if let Some((_, _, active_letter, _)) = vd.take() {
                 drop(vd);
                 if let Ok(root) = self.mount_root() {
+                    if opendrive_platform::normalize_drive_letter(&active_letter).is_ok() {
+                        let _ = self.backend.cleanup_legacy_subst(&active_letter, &root);
+                    }
                     let _ = self.backend.sync_this_pc_namespace(false, &root, None);
-                    let _ = self.backend.cleanup_legacy_subst(&letter, &root);
                 }
             }
         }
@@ -267,34 +285,5 @@ impl MountManager {
 impl Drop for MountManager {
     fn drop(&mut self) {
         self.shutdown_all();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::live::spawn_watchdog_with;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    #[test]
-    fn spawn_watchdog_with_covers_all_paths() {
-        let t = std::env::temp_dir().join(format!("od-wd-{}", uuid::Uuid::new_v4()));
-        let (pid, exe, deps) = (t.join("s/p"), t.join("a"), t.join("deps/t"));
-        let st = AtomicBool::new(false);
-        for (p, l, dis, ex, ok) in [
-            (Some(pid.as_path()), None, true, Some(exe.as_path()), true),
-            (Some(pid.as_path()), None, false, None, true),
-            (None, None, false, Some(deps.as_path()), true),
-            (None, None, false, Some(exe.as_path()), false),
-            (None, Some("Z"), false, Some(exe.as_path()), true),
-            (None, None, false, Some(exe.as_path()), true),
-        ] {
-            let bg = |_: &std::path::Path, _: &[&str]| {
-                ok.then_some(()).ok_or_else(|| std::io::Error::other("e"))
-            };
-            spawn_watchdog_with(p, (&t, l), (dis, ex, &st), || "Q".into(), bg);
-        }
-        assert!(st.load(Ordering::SeqCst) && pid.is_file());
-        super::MountManager::new_null().dehydrate_path(&t);
-        let _ = std::fs::remove_dir_all(&t);
     }
 }

@@ -70,6 +70,22 @@ pub(super) fn paint_entry_icon(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExplorerScope {
+    #[default]
+    MyDrive,
+    SharedWithMe,
+}
+
+impl ExplorerScope {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::MyDrive => "My Drive",
+            Self::SharedWithMe => "Shared with me",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExplorerViewMode {
     #[default]
     List,
@@ -78,6 +94,7 @@ pub enum ExplorerViewMode {
 
 #[derive(Debug, Clone, Default)]
 pub struct AccountExplorerSession {
+    pub scope: ExplorerScope,
     pub breadcrumbs: Vec<(NodeId, String)>,
     pub entries: Vec<ExplorerEntry>,
     pub folder_cache: HashMap<NodeId, Vec<ExplorerEntry>>,
@@ -101,61 +118,6 @@ pub struct ExplorerState {
     pub clipboard: Option<ExplorerClipboard>,
     pub modal: Option<ExplorerModal>,
     pub(crate) last_item_click: Option<(Uuid, NodeId, egui::Pos2, f64)>,
-}
-
-impl ExplorerState {
-    pub fn active_session(&self) -> Option<&AccountExplorerSession> {
-        self.active_account_id.and_then(|id| self.sessions.get(&id))
-    }
-
-    pub fn active_session_mut(&mut self) -> Option<&mut AccountExplorerSession> {
-        self.active_account_id
-            .and_then(|id| self.sessions.get_mut(&id))
-    }
-
-    pub fn current_folder_id(&self, account_id: Uuid) -> Option<NodeId> {
-        self.sessions
-            .get(&account_id)
-            .and_then(|s| s.breadcrumbs.last().map(|(id, _)| *id))
-    }
-
-    pub fn active_account_and_folder(&self) -> Option<(Uuid, NodeId)> {
-        let aid = self.active_account_id?;
-        self.current_folder_id(aid).map(|fid| (aid, fid))
-    }
-
-    pub fn is_busy(&self, account_id: Uuid) -> bool {
-        self.busy_accounts.get(&account_id).copied().unwrap_or(0) > 0
-    }
-
-    pub fn inc_busy(&mut self, account_id: Uuid) {
-        *self.busy_accounts.entry(account_id).or_insert(0) += 1;
-    }
-
-    pub fn dec_busy(&mut self, account_id: Uuid) {
-        if let Some(count) = self.busy_accounts.get_mut(&account_id) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.busy_accounts.remove(&account_id);
-            }
-        }
-    }
-
-    pub fn prune_clipboard_ids(&mut self, account_id: Uuid, ids: &[NodeId]) {
-        let Some(clip) = self
-            .clipboard
-            .as_mut()
-            .filter(|c| c.account_id == account_id)
-        else {
-            return;
-        };
-        clip.node_ids.retain(|id| !ids.contains(id));
-        if clip.node_ids.is_empty() {
-            self.clipboard = None;
-        } else if clip.node_ids.len() > 1 {
-            clip.name = format!("{} items", clip.node_ids.len());
-        }
-    }
 }
 
 fn render_bento_pane(
@@ -202,6 +164,8 @@ fn render_main_pane(
     let can_write = active_acct.as_ref().is_some_and(|a| !a.read_only);
     let overlay_open = app.settings_open
         || app.guide_open
+        || app.drawer_open
+        || app.support_open
         || app.available_release.is_some()
         || app.explorer.modal.is_some();
     handle_explorer_shortcuts(ui.ctx(), &app.explorer, can_write, overlay_open, actions);
@@ -244,51 +208,63 @@ pub fn render_explorer_panel(
     egui::CentralPanel::default().frame(frame).show(ui, |ui| {
         crate::desktop::bento::paint_bento_dots(ui.painter(), ui.max_rect(), pal);
         let avail = ui.available_size();
-        if avail.x < 680.0 {
-            let back_slot = ui.painter().add(egui::Shape::Noop);
+        if avail.x < 720.0 {
+            let slot = ui.painter().add(egui::Shape::Noop);
             let card = Frame::new()
                 .fill(pal.card_bg)
                 .stroke(Stroke::new(1.5, pal.tactile_ink))
                 .corner_radius(egui::CornerRadius::same(12))
                 .inner_margin(Margin::same(12));
-            let top_res = card.show(ui, |ui| {
+            let top = card.show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 render_explorer_sidebar(ui, pal, app, true, actions);
             });
-            let sh_r = top_res.response.rect.translate(Vec2::new(3.5, 3.5));
             ui.painter().set(
-                back_slot,
-                egui::Shape::rect_filled(sh_r, egui::CornerRadius::same(12), pal.pop_pink),
+                slot,
+                egui::Shape::rect_filled(
+                    top.response.rect.translate(Vec2::splat(3.5)),
+                    egui::CornerRadius::same(12),
+                    pal.pop_pink,
+                ),
             );
             ui.add_space(12.0);
             let rem = ui.available_rect_before_wrap();
-            let sz = Vec2::new(
-                (rem.width() - 4.0).max(200.0),
-                (rem.height() - 4.0).max(200.0),
+            let main_rect = egui::Rect::from_min_size(
+                rem.min,
+                Vec2::new(
+                    (rem.width() - 4.0).max(200.0),
+                    (rem.height() - 4.0).max(200.0),
+                ),
             );
-            let main_rect = egui::Rect::from_min_size(rem.min, sz);
             ui.allocate_rect(main_rect, egui::Sense::hover());
             render_bento_pane(ui, pal, main_rect, pal.pop_cyan, 14.0, |ui| {
                 render_main_pane(ui, pal, app, actions)
             });
         } else {
-            let grid_rect = ui.available_rect_before_wrap();
-            let (gap, shadow_pad) = (16.0, 4.0);
-            let card_h = (grid_rect.height() - shadow_pad).max(200.0);
-            let sidebar_w = (grid_rect.width() * 0.27).clamp(246.0, 260.0);
-            let main_w = (grid_rect.width() - sidebar_w - gap - shadow_pad).max(220.0);
-            let left_rect = egui::Rect::from_min_size(grid_rect.min, Vec2::new(sidebar_w, card_h));
-            let right_rect = egui::Rect::from_min_size(
-                egui::Pos2::new(grid_rect.min.x + sidebar_w + gap, grid_rect.min.y),
-                Vec2::new(main_w, card_h),
+            let g = ui.available_rect_before_wrap();
+            let card_h = (g.height() - 4.0).max(200.0);
+            let side_w = (g.width() * 0.28).clamp(276.0, 300.0);
+            let main_w = (g.width() - side_w - 20.0).max(220.0);
+            ui.allocate_rect(g, egui::Sense::hover());
+            render_bento_pane(
+                ui,
+                pal,
+                egui::Rect::from_min_size(g.min, Vec2::new(side_w, card_h)),
+                pal.pop_pink,
+                14.0,
+                |ui| render_explorer_sidebar(ui, pal, app, false, actions),
             );
-            ui.allocate_rect(grid_rect, egui::Sense::hover());
-            render_bento_pane(ui, pal, left_rect, pal.pop_pink, 14.0, |ui| {
-                render_explorer_sidebar(ui, pal, app, false, actions);
-            });
-            render_bento_pane(ui, pal, right_rect, pal.pop_cyan, 14.0, |ui| {
-                render_main_pane(ui, pal, app, actions);
-            });
+            render_bento_pane(
+                ui,
+                pal,
+                egui::Rect::from_min_size(
+                    egui::Pos2::new(g.min.x + side_w + 16.0, g.min.y),
+                    Vec2::new(main_w, card_h),
+                ),
+                pal.pop_cyan,
+                14.0,
+                |ui| render_main_pane(ui, pal, app, actions),
+            );
         }
     });
 }

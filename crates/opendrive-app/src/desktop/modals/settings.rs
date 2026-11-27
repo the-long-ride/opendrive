@@ -1,19 +1,20 @@
 //! Centered Settings Modal with OS/VFS/bandwidth/cache, Open With rules, and encrypted .odcred backup.
 
+use super::font_ui::{render_font_section, FontPickerDraft};
 use super::open_rules_ui::{render_open_rules_section, OpenRuleDraft};
-use super::{render_about_footer, render_vault_backup_section};
-use crate::design::formatters::{
-    bandwidth_to_step, cache_to_step, compute_cache_ratio, format_bandwidth, format_bytes,
-    step_to_bandwidth, step_to_cache, BANDWIDTH_STEPS, CACHE_STEPS_BYTES,
+use super::{
+    render_about_footer, render_bandwidth_and_cache, render_vault_backup_section,
+    render_version_changelog_link,
 };
 use crate::design::theme::ThemePalette;
-use crate::design::widgets::{bento_card, pill_button, BentoLayerAccent, ButtonVariant, IconKind};
-use crate::design::widgets_controls::{
-    setting_switch_row, tactile_step_slider, tactile_switch_tip,
+use crate::design::widgets::{
+    bento_card_with_header, pill_button, BentoLayerAccent, ButtonVariant, IconKind,
 };
+use crate::design::widgets_controls::{setting_switch_row, tactile_switch_tip};
 use crate::desktop::UiAction;
 use crate::runtime::bridge::AppStateResponse;
 use crate::runtime::bridge_types::VaultBackupDraft;
+use crate::runtime::fonts::DiscoveredFont;
 use eframe::egui::{self, Align, Color32, Id, Layout, RichText, ScrollArea, Vec2};
 use opendrive_core::DocsMode;
 
@@ -25,6 +26,8 @@ pub fn render_settings_modal(
     state: &AppStateResponse,
     vault: &mut VaultBackupDraft,
     rule_draft: &mut OpenRuleDraft,
+    fonts: &[DiscoveredFont],
+    font_draft: &mut FontPickerDraft,
     release_checking: bool,
     actions: &mut Vec<UiAction>,
 ) {
@@ -57,19 +60,30 @@ pub fn render_settings_modal(
         .show(ctx, |ui| {
             ui.set_max_width(modal_w);
             ui.set_min_width(modal_w);
-            bento_card(
+            let mut hdr_actions = Vec::new();
+            bento_card_with_header(
                 ui,
                 pal,
                 BentoLayerAccent::Dual,
                 "OpenDrive Settings",
-                Some("Configure startup, virtual drive mapping, cache/bandwidth, open rules, and backups."),
-                None,
+                Some("Configure startup, virtual drive mapping, cache/bandwidth, fonts, open rules, and backups."),
+                |ui| render_version_changelog_link(ui, pal, &mut hdr_actions),
                 |ui| {
                     ScrollArea::vertical()
                         .max_height(max_body_h)
                         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .show(ui, |ui| {
-                            render_settings_body(ui, pal, state, vault, rule_draft, release_checking, actions);
+                            render_settings_body(
+                                ui,
+                                pal,
+                                state,
+                                vault,
+                                rule_draft,
+                                fonts,
+                                font_draft,
+                                release_checking,
+                                actions,
+                            );
                         });
                     ui.add_space(14.0);
                     ui.horizontal(|ui| {
@@ -84,15 +98,19 @@ pub fn render_settings_modal(
                     });
                 },
             );
+            actions.extend(hdr_actions);
         });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_settings_body(
     ui: &mut egui::Ui,
     pal: &ThemePalette,
     state: &AppStateResponse,
     vault: &mut VaultBackupDraft,
     rule_draft: &mut OpenRuleDraft,
+    fonts: &[DiscoveredFont],
+    font_draft: &mut FontPickerDraft,
     release_checking: bool,
     actions: &mut Vec<UiAction>,
 ) {
@@ -113,11 +131,11 @@ fn render_settings_body(
     let vd_title = "Show OpenDrive in This PC";
     let vd_sub = if vd_supported {
         format!(
-            "Show {} with cloud quota under This PC -> Devices and drives",
+            "Show {} with OpenDrive logo and cloud quota under This PC -> Devices and drives",
             state.mount_root
         )
     } else {
-        "Windows only — pins OpenDrive under This PC -> Devices and drives".into()
+        "Windows only — shows OpenDrive with cloud quota under This PC -> Devices and drives".into()
     };
     if setting_switch_row(
         ui,
@@ -209,63 +227,17 @@ fn render_settings_body(
     });
 
     ui.add_space(12.0);
-    let bw_step = bandwidth_to_step(settings.bandwidth_limit);
-    let bw_lbl = format_bandwidth(settings.bandwidth_limit);
-    let cache_pct = compute_cache_ratio(state.stats.cache_bytes, settings.cache_max_size);
-    let cache_readout = format!(
-        "{} / {} ({cache_pct}%)",
-        format_bytes(state.stats.cache_bytes),
-        format_bytes(settings.cache_max_size),
-    );
-    let cache_step = cache_to_step(settings.cache_max_size);
-    let mut next_bw = None;
-    let mut next_cache = None;
-    if ui.available_width() >= 420.0 {
-        ui.columns(2, |cols| {
-            next_bw = tactile_step_slider(
-                &mut cols[0],
-                pal,
-                bw_step,
-                BANDWIDTH_STEPS.len(),
-                "Bandwidth",
-                &bw_lbl,
-            );
-            next_cache = tactile_step_slider(
-                &mut cols[1],
-                pal,
-                cache_step,
-                CACHE_STEPS_BYTES.len(),
-                "Cache Limit",
-                &cache_readout,
-            );
-        });
-    } else {
-        next_bw = tactile_step_slider(
-            ui,
-            pal,
-            bw_step,
-            BANDWIDTH_STEPS.len(),
-            "Bandwidth",
-            &bw_lbl,
-        );
-        ui.add_space(10.0);
-        next_cache = tactile_step_slider(
-            ui,
-            pal,
-            cache_step,
-            CACHE_STEPS_BYTES.len(),
-            "Cache Limit",
-            &cache_readout,
-        );
-    }
-    if let Some(next_step) = next_bw {
-        actions.push(UiAction::SetBandwidth(step_to_bandwidth(next_step)));
-    }
-    if let Some(next_step) = next_cache {
-        actions.push(UiAction::SetCacheMax(step_to_cache(next_step)));
-    }
-
+    render_bandwidth_and_cache(ui, pal, state, actions);
     ui.add_space(14.0);
+    render_font_section(
+        ui,
+        pal,
+        settings.ui_font_family.as_deref(),
+        fonts,
+        font_draft,
+        actions,
+    );
+    ui.add_space(12.0);
     render_open_rules_section(ui, pal, &settings.open_with_rules, rule_draft, actions);
     ui.add_space(12.0);
     render_vault_backup_section(ui, pal, vault, actions);

@@ -31,6 +31,7 @@ fn hit(ctx: &egui::Context, app: &mut ControlCenterApp, maximized: bool, pos: Po
 }
 
 fn hit_txt(ctx: &egui::Context, app: &mut ControlCenterApp, needle: &str) -> bool {
+    let _ = run_vp(ctx, app, false, Vec::new());
     let shapes = run_vp(ctx, app, false, Vec::new());
     let texts = collect(&shapes);
     if has(&texts, needle) {

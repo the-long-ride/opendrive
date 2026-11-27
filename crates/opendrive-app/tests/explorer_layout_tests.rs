@@ -231,7 +231,7 @@ async fn explorer_toolbar_rows_align_and_cli_fallbacks_work() {
     ];
     for w in [960.0, 760.0] {
         let nested_shapes = render_shapes_at(&ctx, &mut app, w);
-        let rects = collect_band_rects(&nested_shapes, 240.0);
+        let rects = collect_band_rects(&nested_shapes, 280.0);
         assert!(
             rects.len() >= 9,
             "width {w}: expected breadcrumbs + controls"

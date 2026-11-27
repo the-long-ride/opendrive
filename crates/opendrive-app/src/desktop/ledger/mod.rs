@@ -3,14 +3,13 @@
 mod row;
 
 use self::row::render_account_row;
-use crate::design::formatters::{format_account_storage, NewAccountDraft};
+use crate::design::formatters::format_account_storage;
 use crate::design::theme::ThemePalette;
 use crate::design::tooltip::attach_smart_tooltip;
 use crate::design::widgets::{
     bento_card_with_header, check_bullet_row, pill_button, singleline_input, BentoLayerAccent,
     ButtonVariant, IconKind,
 };
-use crate::desktop::drawer::render_connect_drawer;
 use crate::desktop::{ControlCenterApp, UiAction};
 use crate::runtime::auth_runner::AuthSession;
 use crate::runtime::bridge::AppStateResponse;
@@ -113,12 +112,8 @@ pub fn render_accounts_ledger(
     ui: &mut egui::Ui,
     pal: &ThemePalette,
     state: &AppStateResponse,
-    drawer_open: bool,
-    reauth_target_name: Option<&str>,
-    draft: &mut NewAccountDraft,
     alias_edit: &mut Option<AliasEditDraft>,
     auth_session: Option<&AuthSession>,
-    form_error: Option<&str>,
     avatars: &HashMap<Uuid, egui::TextureHandle>,
     actions: &mut Vec<UiAction>,
 ) {
@@ -135,30 +130,22 @@ pub fn render_accounts_ledger(
         "Connected Accounts",
         None,
         |ui| {
-            let (icon, lbl, var) = if drawer_open {
-                (IconKind::Close, "Close", ButtonVariant::TactilePill)
-            } else {
-                (IconKind::Plus, "Connect", ButtonVariant::Primary)
-            };
-            if pill_button(ui, pal, Some(icon), lbl, var, true, true) {
+            if pill_button(
+                ui,
+                pal,
+                Some(IconKind::Plus),
+                "Connect",
+                ButtonVariant::Primary,
+                true,
+                true,
+            ) {
                 toggle_drawer_clicked = true;
             }
             ui.add_space(8.0);
             ui.label(RichText::new(count_meta).size(12.5).color(pal.text_muted));
         },
         |ui| {
-            if drawer_open {
-                render_connect_drawer(
-                    ui,
-                    pal,
-                    reauth_target_name,
-                    draft,
-                    auth_session,
-                    form_error,
-                    actions,
-                );
-            }
-            if state.accounts.is_empty() && !drawer_open {
+            if state.accounts.is_empty() {
                 check_bullet_row(ui, pal, "Multi-account sync into unified local mount roots");
                 ui.add_space(6.0);
                 check_bullet_row(

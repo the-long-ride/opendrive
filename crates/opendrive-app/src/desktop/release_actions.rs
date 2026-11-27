@@ -1,8 +1,10 @@
 use super::ControlCenterApp;
 use crate::design::avatars::sync_avatar_textures;
 use crate::design::theme::apply_studio_theme;
+use crate::runtime::app_logs::app_log_hub;
 use crate::runtime::release_check::spawn_release_check;
 use eframe::egui;
+use opendrive_core::LogSeverity;
 
 impl ControlCenterApp {
     pub(super) fn poll_bridge_and_avatars(&mut self, ctx: &egui::Context) {
@@ -12,8 +14,15 @@ impl ControlCenterApp {
         }
         if let Some((is_err, msg)) = self.bridge.take_mount_notice() {
             if is_err {
-                self.set_err(msg);
+                app_log_hub().record_event(
+                    LogSeverity::Error,
+                    "opendrive::mount",
+                    Some("OD-MNT-001"),
+                    &msg,
+                );
+                self.set_err_without_log(msg);
             } else {
+                app_log_hub().record_event(LogSeverity::Info, "opendrive::mount", None, &msg);
                 self.set_ok(msg);
             }
         }
@@ -23,7 +32,9 @@ impl ControlCenterApp {
         if self.applied_theme != Some(self.theme_mode) {
             apply_studio_theme(ctx, self.theme_mode);
             self.applied_theme = Some(self.theme_mode);
+            self.applied_font = None;
         }
+        self.sync_applied_ui_font(ctx);
         sync_avatar_textures(
             ctx,
             self.bridge.data_dir(),
@@ -84,8 +95,14 @@ impl ControlCenterApp {
                 }
             }
             Err(err) => {
+                app_log_hub().record_event(
+                    LogSeverity::Warn,
+                    "opendrive::release",
+                    Some("OD-CFG-003"),
+                    &err,
+                );
                 if manual {
-                    self.set_err(format!("Release check failed: {err}"));
+                    self.set_err_without_log(format!("Release check failed: {err}"));
                 }
             }
         }

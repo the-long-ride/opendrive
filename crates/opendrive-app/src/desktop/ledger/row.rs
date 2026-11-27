@@ -78,6 +78,15 @@ fn render_account_actions(
                 }
             });
         }
+        if row_btn(
+            ui,
+            pal,
+            IconKind::Key,
+            "Credentials",
+            ButtonVariant::Default,
+        ) {
+            actions.push(UiAction::OpenReauthCredentials(id.clone()));
+        }
     }
     let (sync_tip, sync_lbl, sync_col) = if is_paused {
         (

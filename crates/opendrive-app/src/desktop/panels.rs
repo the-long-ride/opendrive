@@ -3,10 +3,12 @@
 use crate::design::theme::ThemePalette;
 use crate::design::widgets::{paint_icon, pill_button, ButtonVariant, IconKind};
 use crate::desktop::bento::{paint_bento_dots, render_bento_overview};
+use crate::desktop::drawer::render_connect_modal;
 use crate::desktop::ledger::render_accounts_ledger;
 use crate::desktop::modals::guide::render_cloud_guide_modal;
 use crate::desktop::modals::release::render_release_modal;
 use crate::desktop::modals::settings::render_settings_modal;
+use crate::desktop::modals::support::render_support_modal;
 use crate::desktop::{ControlCenterApp, NoticeTone, UiAction, UiNotice};
 use eframe::egui::{
     self, Align, CornerRadius, Frame, Layout, Margin, RichText, ScrollArea, Stroke, Vec2,
@@ -19,6 +21,40 @@ pub(super) fn render_overlays(
     app: &mut ControlCenterApp,
     actions: &mut Vec<UiAction>,
 ) {
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        if app.explorer.modal.is_some() {
+            actions.push(UiAction::ExplorerDismissModal);
+        } else if app.available_release.is_some() {
+            actions.push(UiAction::DismissReleaseDialog);
+        } else if app.support_open {
+            actions.push(UiAction::ToggleSupportModal(Some(false)));
+        } else if app.guide_open {
+            actions.push(UiAction::ToggleGuide(Some(false)));
+        } else if app.settings_open {
+            actions.push(UiAction::ToggleSettings(Some(false)));
+        } else if app.drawer_open {
+            actions.push(UiAction::ToggleDrawer(Some(false)));
+        }
+    }
+    if app.drawer_open {
+        let reauth_name = app.reauth_account_id.and_then(|id| {
+            app.state
+                .accounts
+                .iter()
+                .find(|a| a.id == id)
+                .map(|a| a.nickname.clone())
+        });
+        render_connect_modal(
+            ctx,
+            pal,
+            top_y,
+            reauth_name.as_deref(),
+            &mut app.draft,
+            app.auth_session.as_ref(),
+            app.form_error.as_deref(),
+            actions,
+        );
+    }
     if app.settings_open {
         render_settings_modal(
             ctx,
@@ -27,12 +63,17 @@ pub(super) fn render_overlays(
             &app.state,
             &mut app.vault_draft,
             &mut app.open_rule_draft,
+            &app.available_fonts,
+            &mut app.font_draft,
             app.release_checking,
             actions,
         );
     }
     if app.guide_open {
-        render_cloud_guide_modal(ctx, pal, top_y, actions);
+        render_cloud_guide_modal(ctx, pal, top_y, &mut app.guide_state, actions);
+    }
+    if app.support_open {
+        render_support_modal(ctx, pal, top_y, actions);
     }
     if let Some(release) = app.available_release.as_ref() {
         render_release_modal(ctx, pal, top_y, release, actions);
@@ -75,23 +116,12 @@ pub fn render_workspace_panel(
                                 ui.set_max_width(content_w);
                                 render_bento_overview(ui, pal, &app.state, actions);
                                 ui.add_space(16.0);
-                                let reauth_name = app.reauth_account_id.and_then(|id| {
-                                    app.state
-                                        .accounts
-                                        .iter()
-                                        .find(|a| a.id == id)
-                                        .map(|a| a.nickname.clone())
-                                });
                                 render_accounts_ledger(
                                     ui,
                                     pal,
                                     &app.state,
-                                    app.drawer_open,
-                                    reauth_name.as_deref(),
-                                    &mut app.draft,
                                     &mut app.alias_edit,
                                     app.auth_session.as_ref(),
-                                    app.form_error.as_deref(),
                                     &app.avatar_textures,
                                     actions,
                                 );

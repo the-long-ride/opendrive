@@ -6,11 +6,15 @@ pub(crate) use self::sections::render_oauth_pending;
 use self::sections::{render_browser_oauth_body, render_service_account_body};
 use crate::design::formatters::{ConnectAuthMode, NewAccountDraft};
 use crate::design::theme::ThemePalette;
-use crate::design::widgets::{pill_button, singleline_input, ButtonVariant, IconKind};
+use crate::design::widgets::{
+    bento_card_with_header, pill_button, singleline_input, BentoLayerAccent, ButtonVariant,
+    IconKind,
+};
 use crate::design::widgets_controls::setting_switch_row;
 use crate::desktop::UiAction;
 use crate::runtime::auth_runner::AuthSession;
-use eframe::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
+use eframe::egui::scroll_area::ScrollBarVisibility;
+use eframe::egui::{self, Color32, Id, Pos2, Rect, RichText, ScrollArea, Vec2};
 
 pub(super) fn drawer_field(
     ui: &mut egui::Ui,
@@ -74,36 +78,60 @@ pub(super) fn render_form_error(ui: &mut egui::Ui, pal: &ThemePalette, form_erro
     }
 }
 
-pub fn render_connect_drawer(
-    ui: &mut egui::Ui,
+#[allow(clippy::too_many_arguments)]
+pub fn render_connect_modal(
+    ctx: &egui::Context,
     pal: &ThemePalette,
+    top_bar_bottom: f32,
     reauth_target_name: Option<&str>,
     draft: &mut NewAccountDraft,
     auth_session: Option<&AuthSession>,
     form_error: Option<&str>,
     actions: &mut Vec<UiAction>,
 ) {
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        actions.push(UiAction::ToggleDrawer(Some(false)));
+        return;
+    }
+    let screen = ctx.content_rect();
+    let top_y = top_bar_bottom.clamp(screen.min.y, screen.max.y);
+    let overlay = Rect::from_min_max(Pos2::new(screen.min.x, top_y), screen.max);
+    egui::Area::new(Id::unique("connect_modal_backdrop"))
+        .fixed_pos(overlay.min)
+        .order(egui::Order::Middle)
+        .show(ctx, |ui| {
+            let (rect, resp) = ui.allocate_exact_size(overlay.size(), egui::Sense::click());
+            ui.painter()
+                .rect_filled(rect, 0.0, Color32::from_black_alpha(145));
+            if resp.clicked() {
+                actions.push(UiAction::ToggleDrawer(Some(false)));
+            }
+        });
+
     let heading = match reauth_target_name {
         Some(name) => format!("Re-authenticate {name}"),
         None => "Connect Google Drive Account".to_string(),
     };
-    Frame::new()
-        .fill(pal.card_alt)
-        .stroke(Stroke::new(1.0, pal.card_border))
-        .corner_radius(CornerRadius::same(10))
-        .inner_margin(Margin::same(16))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(heading)
-                        .size(15.0)
-                        .strong()
-                        .color(pal.text_primary),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+    let modal_w = (overlay.width() - 64.0).clamp(320.0, 680.0);
+    let center_offset_y = (top_y - screen.min.y) * 0.5;
+    let max_body_h = (overlay.height() - 64.0 - 130.0).clamp(160.0, 500.0);
+    egui::Area::new(Id::unique("connect_modal_card"))
+        .anchor(egui::Align2::CENTER_CENTER, Vec2::new(0.0, center_offset_y))
+        .default_size(Vec2::new(modal_w, max_body_h + 130.0))
+        .order(egui::Order::Foreground)
+        .show(ctx, |ui| {
+            ui.set_max_width(modal_w);
+            ui.set_min_width(modal_w);
+            let mut hdr_actions = Vec::new();
+            bento_card_with_header(
+                ui,
+                pal,
+                BentoLayerAccent::Dual,
+                &heading,
+                None,
+                |ui| {
                     if pill_button(ui, pal, None, "Cancel", ButtonVariant::Default, true, true) {
-                        actions.push(UiAction::ToggleDrawer(Some(false)));
+                        hdr_actions.push(UiAction::ToggleDrawer(Some(false)));
                     }
                     if pill_button(
                         ui,
@@ -114,7 +142,7 @@ pub fn render_connect_drawer(
                         true,
                         true,
                     ) {
-                        actions.push(UiAction::OpenVaultBackup);
+                        hdr_actions.push(UiAction::OpenVaultBackup);
                     }
                     if pill_button(
                         ui,
@@ -125,48 +153,74 @@ pub fn render_connect_drawer(
                         true,
                         true,
                     ) {
-                        actions.push(UiAction::ToggleGuide(Some(true)));
+                        hdr_actions.push(UiAction::ToggleGuide(Some(true)));
                     }
-                });
-            });
-            ui.add_space(10.0);
-            ui.horizontal_wrapped(|ui| {
-                if pill_button(
-                    ui,
-                    pal,
-                    Some(IconKind::External),
-                    "Browser Sign-In",
-                    ButtonVariant::Toggle {
-                        selected: draft.auth_mode == ConnectAuthMode::BrowserOAuth,
-                    },
-                    true,
-                    true,
-                ) {
-                    actions.push(UiAction::SetAuthMode(ConnectAuthMode::BrowserOAuth));
-                }
-                if pill_button(
-                    ui,
-                    pal,
-                    Some(IconKind::Key),
-                    "Service Account JSON (No Login)",
-                    ButtonVariant::Toggle {
-                        selected: draft.auth_mode == ConnectAuthMode::ServiceAccount,
-                    },
-                    true,
-                    true,
-                ) {
-                    actions.push(UiAction::SetAuthMode(ConnectAuthMode::ServiceAccount));
-                }
-            });
-            ui.add_space(10.0);
-            match draft.auth_mode {
-                ConnectAuthMode::BrowserOAuth => {
-                    render_browser_oauth_body(ui, pal, draft, auth_session, form_error, actions);
-                }
-                ConnectAuthMode::ServiceAccount => {
-                    render_service_account_body(ui, pal, draft, auth_session, form_error, actions);
-                }
-            }
+                },
+                |ui| {
+                    ScrollArea::vertical()
+                        .max_height(max_body_h)
+                        .min_scrolled_height(max_body_h)
+                        .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.horizontal_wrapped(|ui| {
+                                if pill_button(
+                                    ui,
+                                    pal,
+                                    Some(IconKind::External),
+                                    "Browser Sign-In",
+                                    ButtonVariant::Toggle {
+                                        selected: draft.auth_mode == ConnectAuthMode::BrowserOAuth,
+                                    },
+                                    true,
+                                    true,
+                                ) {
+                                    actions
+                                        .push(UiAction::SetAuthMode(ConnectAuthMode::BrowserOAuth));
+                                }
+                                if pill_button(
+                                    ui,
+                                    pal,
+                                    Some(IconKind::Key),
+                                    "Service Account JSON (No Login)",
+                                    ButtonVariant::Toggle {
+                                        selected: draft.auth_mode
+                                            == ConnectAuthMode::ServiceAccount,
+                                    },
+                                    true,
+                                    true,
+                                ) {
+                                    actions.push(UiAction::SetAuthMode(
+                                        ConnectAuthMode::ServiceAccount,
+                                    ));
+                                }
+                            });
+                            ui.add_space(10.0);
+                            match draft.auth_mode {
+                                ConnectAuthMode::BrowserOAuth => {
+                                    render_browser_oauth_body(
+                                        ui,
+                                        pal,
+                                        draft,
+                                        auth_session,
+                                        form_error,
+                                        actions,
+                                    );
+                                }
+                                ConnectAuthMode::ServiceAccount => {
+                                    render_service_account_body(
+                                        ui,
+                                        pal,
+                                        draft,
+                                        auth_session,
+                                        form_error,
+                                        actions,
+                                    );
+                                }
+                            }
+                        });
+                },
+            );
+            actions.extend(hdr_actions);
         });
-    ui.add_space(12.0);
 }
