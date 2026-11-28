@@ -5,7 +5,7 @@ pub(super) type StepItem = (&'static str, &'static [&'static [Seg]]);
 
 pub(super) const OAUTH_STEPS: &[StepItem] = &[
     (
-        "Create or select a Google Cloud project",
+        "Choose Personal or External OAuth",
         &[
             &[
                 ("Open ", false),
@@ -13,7 +13,38 @@ pub(super) const OAUTH_STEPS: &[StepItem] = &[
                 (" and sign in.", false),
             ],
             &[
-                ("Click the ", false),
+                ("For one Google account, find ", false),
+                ("Quick setup for personal use (Personal mode)", true),
+                (
+                    " in Google Cloud Help and create a Desktop app client.",
+                    false,
+                ),
+            ],
+            &[
+                ("Enable Drive API in Step 2, then go to Step 6.", false),
+                (
+                    " Personal mode skips the unverified-app warning and seven-day testing expiry.",
+                    false,
+                ),
+            ],
+            &[
+                ("Personal mode still requires a ", false),
+                ("Client ID and Client Secret", true),
+                (
+                    ". Sign in as the Google account that created the app.",
+                    false,
+                ),
+            ],
+            &[
+                (
+                    "For multiple accounts or an existing External project, use ",
+                    false,
+                ),
+                ("External", true),
+                (
+                    " and follow all steps. To create a project, click the ",
+                    false,
+                ),
                 ("project picker", true),
                 (" (top-left) -> ", false),
                 ("New Project", true),
@@ -43,7 +74,7 @@ pub(super) const OAUTH_STEPS: &[StepItem] = &[
         ],
     ),
     (
-        "Configure Google Auth platform / OAuth consent screen",
+        "External: Configure Google Auth platform",
         &[
             &[
                 ("Open ", false),
@@ -64,7 +95,7 @@ pub(super) const OAUTH_STEPS: &[StepItem] = &[
         ],
     ),
     (
-        "Audience & Drive Scope (Important)",
+        "External: Audience & Drive Scope",
         &[
             &[
                 ("Under ", false),
@@ -89,7 +120,7 @@ pub(super) const OAUTH_STEPS: &[StepItem] = &[
         ],
     ),
     (
-        "Create a Desktop App OAuth Client",
+        "External: Create a Desktop App OAuth Client",
         &[
             &[
                 ("Open ", false),
@@ -143,11 +174,9 @@ pub(super) const SERVICE_ACCOUNT_STEPS: &[StepItem] = &[
     (
         "Enable Google Drive API",
         &[&[
-            ("Use ", false),
-            ("Option A Steps 1-2", true),
-            (" so ", false),
+            ("Enable the ", false),
             ("Google Drive API", true),
-            (" is enabled in your project.", false),
+            (" in your project as shown in Option A Step 2. No OAuth client is needed.", false),
         ]],
     ),
     (
@@ -183,13 +212,17 @@ pub(super) const SERVICE_ACCOUNT_STEPS: &[StepItem] = &[
                 (") from the JSON.", false),
             ],
             &[
-                ("In ", false),
-                ("drive.google.com", true),
-                (", share target folders/Shared Drives with it (", false),
-                ("Editor", true),
-                (" or ", false),
-                ("Viewer", true),
-                (").", false),
+                ("In a shared ", false),
+                ("My Drive", true),
+                (
+                    " folder, Editor can modify existing files but cannot upload new files as the service account.",
+                    false,
+                ),
+            ],
+            &[
+                ("For new uploads, grant access to add files in a ", false),
+                ("Shared Drive", true),
+                (" or use browser sign-in to upload to My Drive as a Google user.", false),
             ],
         ],
     ),
@@ -244,9 +277,12 @@ pub(super) const TROUBLESHOOTING_TIPS: &[StepItem] = &[
     (
         "Multiple Google accounts",
         &[&[
-            ("One ", false),
-            ("Client ID & Client Secret", true),
-            (" can authorize multiple personal Google accounts.", false),
+            ("Use ", false),
+            ("External", true),
+            (
+                " for multiple accounts. Personal mode only works for the account that created the app.",
+                false,
+            ),
         ]],
     ),
 ];
